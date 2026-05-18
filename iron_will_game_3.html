@@ -1728,12 +1728,16 @@
             </div>
 
             <div style="margin-top: 15px; padding: 10px; background: #1a1a1a; border-radius: 6px; font-size: 11px; color: #888;">
-                <div style="margin-bottom: 5px;">🔧 Debug: 
+                <div style="margin-bottom: 5px;">🔧 Debug:
                     <button onclick="saveGame(); showNotification('Manual save completed', 'info');" style="padding: 3px 8px; font-size: 10px; background: #2196F3; color: white; border: none; border-radius: 3px; cursor: pointer;">Force Save</button>
                     <button onclick="loadGame(); updateUI(); showNotification('Game reloaded from localStorage', 'info');" style="padding: 3px 8px; font-size: 10px; background: #4CAF50; color: white; border: none; border-radius: 3px; cursor: pointer; margin-left: 5px;">Reload</button>
                     <button onclick="console.log('Current gameState:', gameState); console.log('localStorage save:', localStorage.getItem('ironWillSave3')); showNotification('Check browser console for save data', 'info');" style="padding: 3px 8px; font-size: 10px; background: #FF9800; color: white; border: none; border-radius: 3px; cursor: pointer; margin-left: 5px;">Log Save</button>
                 </div>
-                <div id="debugInfo" style="font-family: monospace; font-size: 10px;">Ready</div>
+                <div style="margin-top: 8px; display: flex; gap: 6px; flex-wrap: wrap;">
+                    <button onclick="exportSave()" style="padding: 4px 10px; font-size: 11px; background: #7B1FA2; color: white; border: none; border-radius: 3px; cursor: pointer;">📤 Export Save</button>
+                    <button onclick="document.getElementById('importModal').classList.add('active')" style="padding: 4px 10px; font-size: 11px; background: #37474F; color: white; border: none; border-radius: 3px; cursor: pointer;">📥 Import Save</button>
+                </div>
+                <div id="debugInfo" style="font-family: monospace; font-size: 10px; margin-top: 6px;">Ready</div>
             </div>
         </div>
 
@@ -1930,6 +1934,19 @@
             <div class="story-body" id="storyBody"></div>
             <div class="story-unlock" id="storyUnlock"></div>
             <button class="btn btn-primary" style="width:100%;" onclick="closeStory()">Continue</button>
+        </div>
+    </div>
+
+    <!-- Import Save Modal -->
+    <div class="competition-modal" id="importModal">
+        <div class="competition-content" style="max-width:460px;">
+            <div class="competition-title" style="font-size:18px;">📥 Import Save</div>
+            <p style="color:#aaa;font-size:13px;margin-bottom:10px;">Paste your exported save code below. This will overwrite your current save.</p>
+            <textarea id="importSaveText" style="width:100%;height:120px;background:#1a1a1a;color:#eee;border:1px solid #444;border-radius:6px;padding:8px;font-size:11px;font-family:monospace;resize:vertical;" placeholder="Paste save code here..."></textarea>
+            <div style="display:flex;gap:10px;margin-top:12px;">
+                <button class="btn btn-primary" style="flex:1;" onclick="importSave()">Import</button>
+                <button class="btn" style="flex:1;" onclick="document.getElementById('importModal').classList.remove('active');document.getElementById('importSaveText').value=''">Cancel</button>
+            </div>
         </div>
     </div>
 
@@ -2170,6 +2187,45 @@
             } catch (e) {
                 console.error('Save failed:', e);
                 return false;
+            }
+        }
+
+        // Export save to clipboard
+        function exportSave() {
+            saveGame();
+            const data = localStorage.getItem('ironWillSave3');
+            if (!data) { showNotification('No save data found', 'warning'); return; }
+            if (navigator.clipboard && navigator.clipboard.writeText) {
+                navigator.clipboard.writeText(data).then(() => {
+                    showNotification('Save copied to clipboard! Paste it anywhere to transfer.', 'success');
+                }).catch(() => {
+                    prompt('Copy this save code:', data);
+                });
+            } else {
+                prompt('Copy this save code:', data);
+            }
+        }
+
+        // Import save from pasted text
+        function importSave() {
+            const text = document.getElementById('importSaveText').value.trim();
+            if (!text) { showNotification('Paste your save code first', 'warning'); return; }
+            try {
+                const data = JSON.parse(text);
+                if (typeof data.squat !== 'number') throw new Error('Not a valid save');
+                localStorage.setItem('ironWillSave3', text);
+                document.getElementById('importModal').classList.remove('active');
+                document.getElementById('importSaveText').value = '';
+                loadGame();
+                document.getElementById('intensitySlider').value = gameState.intensity || 80;
+                setFocus(gameState.trainingFocus);
+                updateUIVisibility();
+                renderAchievements();
+                renderPRLog();
+                updateUI();
+                showNotification('Save imported successfully!', 'success');
+            } catch (e) {
+                showNotification('Invalid save code — make sure you copied it completely', 'danger');
             }
         }
 
