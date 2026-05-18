@@ -4635,14 +4635,14 @@
 
         function attemptSuccessChance(weight, max) {
             const ratio = weight / max;
-            // Base chance drops to 0% at ~142% of current max (no floor — sandbaggers get punished)
-            let base = 0.93 - (ratio - 0.90) * 1.8;
-            base = Math.max(0, Math.min(0.97, base));
-            const techBonus     = (gameState.technique - 50) * 0.003;
-            const fatiguePenal  = (gameState.fatigue / 1000) * 0.30;
-            const compEdge      = perkCount('comp_edge') * 0.12;
+            // Base curve: ~93% at 90% of max, reaches 0% at ~142% of max, deeply negative beyond that.
+            // Do NOT clamp base to 0 here — bonuses must not create a floor for unrealistic weights.
+            const base = Math.min(0.97, 0.93 - (ratio - 0.90) * 1.8);
+            const techBonus      = (gameState.technique - 50) * 0.003;
+            const fatiguePenal   = (gameState.fatigue / 1000) * 0.30;
+            const compEdge       = perkCount('comp_edge') * 0.12;
             const checklistBonus = getChecklistBonus();
-            return Math.max(0, Math.min(0.97, base + techBonus - fatiguePenal + compEdge + checklistBonus));
+            return Math.max(0, base + techBonus - fatiguePenal + compEdge + checklistBonus);
         }
 
         function updateAttemptProb(lift, idx, val) {
