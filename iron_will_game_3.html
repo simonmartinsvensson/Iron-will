@@ -2190,6 +2190,87 @@
             }
         }
 
+        // Offline progression — called once on load
+        function applyOfflineProgress() {
+            const now = Date.now();
+            const lastSave = gameState.lastSave || gameState.lastUpdate;
+            if (!lastSave) return;
+            const elapsedMs = now - lastSave;
+            if (elapsedMs < 30000) return; // less than 30 seconds — not worth showing
+
+            const MAX_OFFLINE_MS = 8 * 60 * 60 * 1000; // cap at 8 hours
+            const elapsed = Math.min(elapsedMs, MAX_OFFLINE_MS) / 1000; // seconds
+            const wasCapped = elapsedMs > MAX_OFFLINE_MS;
+
+            // Adaptation gain
+            const adaptRate = getAdaptationRate();
+            const adaptCap  = getAdaptationCost() * 100;
+            gameState.adaptation = Math.min(adaptCap, gameState.adaptation + adaptRate * elapsed);
+
+            // Fatigue: net of build-up and passive recovery
+            const fatigueRate  = getFatigueRate();
+            const recoveryRate = hasPerk('recovery') ? 0.2 : 0.1;
+            const netFatigue   = fatigueRate - recoveryRate;
+            gameState.fatigue  = Math.max(0, Math.min(1000, gameState.fatigue + netFatigue * elapsed));
+
+            // Injury and accessory cooldowns
+            ['squat', 'bench', 'deadlift'].forEach(lift => {
+                if (gameState.injuries   && gameState.injuries[lift]   > 0) gameState.injuries[lift]   = Math.max(0, gameState.injuries[lift]   - elapsed);
+                if (gameState.accessories && gameState.accessories[lift] > 0) gameState.accessories[lift] = Math.max(0, gameState.accessories[lift] - elapsed);
+            });
+
+            // Button cooldowns
+            if (gameState.restCooldown        > 0) gameState.restCooldown        = Math.max(0, gameState.restCooldown        - elapsed);
+            if (gameState.deloadCooldown      > 0) gameState.deloadCooldown      = Math.max(0, gameState.deloadCooldown      - elapsed);
+            if (gameState.competitionCooldown > 0) gameState.competitionCooldown = Math.max(0, gameState.competitionCooldown - elapsed);
+            if (gameState.peaking             > 0) gameState.peaking             = Math.max(0, gameState.peaking             - elapsed);
+
+            // Mentorship passive knowledge
+            if ((gameState.unlockedFeatures || {}).mentorship) {
+                gameState.knowledge += 0.025 * elapsed;
+            }
+
+            // Training block phase advance
+            if ((gameState.unlockedFeatures || {}).periodization && gameState.trainingBlock) {
+                let rem = elapsed;
+                while (rem > 0) {
+                    const tick = Math.min(rem, gameState.trainingBlock.timer);
+                    gameState.trainingBlock.timer -= tick;
+                    rem -= tick;
+                    if (gameState.trainingBlock.timer <= 0) {
+                        gameState.trainingBlock.phase = (gameState.trainingBlock.phase + 1) % TRAINING_PHASES.length;
+                        gameState.trainingBlock.timer = PHASE_DURATION;
+                    }
+                }
+                gameState.intensity = TRAINING_PHASES[gameState.trainingBlock.phase].intensity;
+            }
+
+            // Rival progression
+            if ((gameState.unlockedFeatures || {}).theRival && gameState.rival) {
+                tickRival(elapsed);
+            }
+
+            // Auto-convert PRs if enabled (capped at 500 offline PRs)
+            let prsGained = 0;
+            if (gameState.autoConvert) {
+                while (gameState.adaptation >= getAdaptationCost() && prsGained < 500) {
+                    convertAdaptation(true);
+                    prsGained++;
+                }
+            }
+
+            // Summary notification
+            const totalSeconds = Math.floor(elapsed);
+            const h = Math.floor(totalSeconds / 3600);
+            const m = Math.floor((totalSeconds % 3600) / 60);
+            const timeStr = h > 0 ? `${h}h ${m}m` : `${m}m`;
+            let msg = `⏱ Back after ${timeStr} away.`;
+            if (prsGained > 0) msg += ` ${prsGained} PRs hit while you were gone.`;
+            else msg += ` Adaptation built up — ready to convert.`;
+            if (wasCapped) msg += ' (capped at 8h)';
+            setTimeout(() => showNotification(msg, 'info'), 600);
+        }
+
         // Export save to clipboard
         function exportSave() {
             saveGame();
@@ -4921,6 +5002,7 @@
 
         if (loaded) {
             console.log('Save loaded successfully!');
+            applyOfflineProgress();
         } else {
             console.log('Starting new game');
         }
@@ -4942,14 +5024,12 @@
             showNotification('⚠️ Warning: Save system may not work in this browser', 'warning');
         }
 
-        // Show welcome message
-        setTimeout(() => {
-            if (loaded) {
-                showNotification('💾 Progress loaded. Welcome back to the iron.', 'info');
-            } else {
+        // Show welcome message (only for new games — returning players get the offline summary instead)
+        if (!loaded) {
+            setTimeout(() => {
                 showNotification('💪 Welcome to Iron Will. Your journey begins today. The iron never lies.', 'info');
-            }
-        }, 500);
+            }, 500);
+        }
     </script>
 </body>
 </html>
