@@ -1738,7 +1738,7 @@
                     <button onclick="document.getElementById('importModal').classList.add('active')" style="padding: 4px 10px; font-size: 11px; background: #37474F; color: white; border: none; border-radius: 3px; cursor: pointer;">📥 Import Save</button>
                 </div>
                 <div id="debugInfo" style="font-family: monospace; font-size: 10px; margin-top: 6px;">Ready</div>
-                <div style="font-size: 10px; color: #555; margin-top: 4px;">Last patch: <span style="color:#666;">2026-05-21 13:48</span></div>
+                <div style="font-size: 10px; color: #555; margin-top: 4px;">Last patch: <span style="color:#666;">2026-05-21 14:31</span></div>
             </div>
         </div>
 
@@ -4956,6 +4956,43 @@
                     <button class="btn btn-primary" style="width:100%;margin-top:8px;" onclick="compData.step++;renderCompModal()">Continue →</button>`;
             }
 
+            // PR comparisons
+            const meetBest = {};
+            ['squat','bench','deadlift'].forEach(l => {
+                const ld = compData.lifts[l];
+                meetBest[l] = Math.max(0, ...ld.results.map((r,i) => r ? ld.attempts[i] : 0));
+            });
+            const meetTotal   = meetBest.squat + meetBest.bench + meetBest.deadlift;
+            const trainPR     = { squat: gameState.squat, bench: gameState.bench, deadlift: gameState.deadlift };
+            const compPR      = gameState.compBests || { squat:0, bench:0, deadlift:0, total:0 };
+            const trainTotal  = trainPR.squat + trainPR.bench + trainPR.deadlift;
+            const liftBest    = meetBest[lift];
+            const isNewTrain  = success && liftBest > 0 && liftBest >= trainPR[lift];
+            const isNewComp   = success && liftBest > 0 && liftBest >= (compPR[lift] || 0);
+            const isNewTotal  = meetTotal > 0 && meetTotal >= (compPR.total || 0);
+
+            const prBlock = `
+                <div style="padding:8px 10px;background:#1a1a1a;border-radius:6px;margin-bottom:8px;font-size:11px;">
+                    <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:5px;">
+                        <span style="color:#777;">${liftName} best this meet</span>
+                        <span style="font-weight:bold;color:#ddd;">${liftBest > 0 ? liftBest+'kg' : '—'}</span>
+                    </div>
+                    <div style="display:flex;gap:16px;color:#666;">
+                        <span>Training PR: <span style="color:${isNewTrain?'#FFD700':'#aaa'};">${trainPR[lift]}kg${isNewTrain?' ✨':''}</span></span>
+                        <span>Comp PR: <span style="color:${isNewComp?'#FFD700':'#aaa'};">${compPR[lift]?compPR[lift]+'kg':'—'}${isNewComp?' ✨':''}</span></span>
+                    </div>
+                    ${meetTotal > 0 ? `<div style="border-top:1px solid #2a2a2a;margin-top:6px;padding-top:6px;display:flex;justify-content:space-between;align-items:center;">
+                        <div>
+                            <div style="color:#777;">Running total</div>
+                            <div style="font-weight:bold;color:#ddd;">${meetTotal}kg</div>
+                        </div>
+                        <div style="text-align:right;">
+                            <div style="color:#777;">Training / Comp PR</div>
+                            <div style="color:#aaa;">${trainTotal}kg / <span style="color:${isNewTotal?'#FFD700':'#aaa'};">${compPR.total?compPR.total+'kg':'—'}${isNewTotal?' ✨':''}</span></div>
+                        </div>
+                    </div>` : ''}
+                </div>`;
+
             el.innerHTML = `
                 <div class="competition-title" style="font-size:14px;">${liftName} — ${roundLabel}</div>
                 <div style="text-align:center;margin:14px 0 8px;">
@@ -4966,6 +5003,7 @@
                     Momentum: <span style="color:${mom.color};font-weight:bold;">${mom.text}</span>
                     ${momentumDeltaText(s, success)}
                 </div>
+                ${prBlock}
                 ${nextSection}`;
         }
 
