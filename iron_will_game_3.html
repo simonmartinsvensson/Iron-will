@@ -1738,7 +1738,7 @@
                     <button onclick="document.getElementById('importModal').classList.add('active')" style="padding: 4px 10px; font-size: 11px; background: #37474F; color: white; border: none; border-radius: 3px; cursor: pointer;">📥 Import Save</button>
                 </div>
                 <div id="debugInfo" style="font-family: monospace; font-size: 10px; margin-top: 6px;">Ready</div>
-                <div style="font-size: 10px; color: #555; margin-top: 4px;">Last patch: <span style="color:#666;">2026-05-21 13:20</span></div>
+                <div style="font-size: 10px; color: #555; margin-top: 4px;">Last patch: <span style="color:#666;">2026-05-21 13:29</span></div>
             </div>
         </div>
 
@@ -4788,13 +4788,13 @@
                 const lName = { squat: 'Squat', bench: 'Bench', deadlift: 'Deadlift' }[lift];
                 rows += `<tr><td style="color:#ddd;font-weight:bold;padding-right:6px;white-space:nowrap;">${lName}</td>`;
                 d.attempts.forEach((w, i) => {
-                    const pct = Math.round(w / d.max * 100);
-                    const col = pct > 100 ? '#f88' : pct > 97 ? '#FF9800' : '#4CAF50';
+                    const chance = Math.round(attemptSuccessChance(w, d.max, 0, 0) * 100);
+                    const col = chance > 70 ? '#4CAF50' : chance > 45 ? '#FF9800' : '#f88';
                     rows += `<td style="padding:2px 3px;">
                         <input class="attempt-input" id="op_${lift}_${i}" type="number"
                             value="${w}" min="20" max="1000" step="2.5" style="width:65px;"
                             oninput="updateOpenerInput('${lift}',${i},this.value)">
-                        <div id="op_pct_${lift}_${i}" style="font-size:9px;color:${col};text-align:center;">${pct}%</div>
+                        <div id="op_pct_${lift}_${i}" style="font-size:9px;color:${col};text-align:center;">${chance}% chance</div>
                     </td>`;
                 });
                 rows += '</tr>';
@@ -4825,10 +4825,10 @@
             const w = Math.round(Math.max(20, parseFloat(val) || 20) / 2.5) * 2.5;
             if (!compData) return;
             compData.lifts[lift].attempts[idx] = w;
-            const pct = Math.round(w / compData.lifts[lift].max * 100);
-            const col = pct > 100 ? '#f88' : pct > 97 ? '#FF9800' : '#4CAF50';
+            const chance = Math.round(attemptSuccessChance(w, compData.lifts[lift].max, 0, 0) * 100);
+            const col = chance > 70 ? '#4CAF50' : chance > 45 ? '#FF9800' : '#f88';
             const pctEl = document.getElementById(`op_pct_${lift}_${idx}`);
-            if (pctEl) { pctEl.textContent = pct + '%'; pctEl.style.color = col; }
+            if (pctEl) { pctEl.textContent = chance + '% chance'; pctEl.style.color = col; }
         }
 
         function renderCompAttempt(el) {
@@ -4944,7 +4944,7 @@
                         <div style="display:flex;align-items:center;gap:8px;">
                             <input class="attempt-input" id="next_inp" type="number" value="${suggested}" min="${minNext}" step="2.5" style="width:80px;"
                                 oninput="updateNextAttempt(this.value,${minNext})">
-                            <span id="next_pct" style="font-size:11px;color:#aaa;">${Math.round(suggested/d.max*100)}%</span>
+                            <span id="next_pct" style="font-size:11px;color:#aaa;">${Math.round(attemptSuccessChance(suggested,d.max,compData.momentum,lift==='deadlift'?compData.squatFatiguePenalty:0)*100)}% chance</span>
                         </div>
                     </div>
                     <button class="btn btn-primary" style="width:100%;margin-top:8px;" onclick="compData.step++;renderCompModal()">Continue →</button>`;
@@ -4973,10 +4973,14 @@
         function updateNextAttempt(val, minWeight) {
             const w = Math.round(Math.max(minWeight, parseFloat(val) || minWeight) / 2.5) * 2.5;
             const s = compData.step;
-            compData.lifts[compLift(s)].attempts[compRound(s) + 1] = w;
-            const max = compData.lifts[compLift(s)].max;
+            const lift = compLift(s);
+            compData.lifts[lift].attempts[compRound(s) + 1] = w;
+            const max = compData.lifts[lift].max;
+            const extraPenalty = lift === 'deadlift' ? compData.squatFatiguePenalty : 0;
+            const chance = Math.round(attemptSuccessChance(w, max, compData.momentum, extraPenalty) * 100);
+            const col = chance > 70 ? '#4CAF50' : chance > 45 ? '#FF9800' : '#f88';
             const pctEl = document.getElementById('next_pct');
-            if (pctEl) pctEl.textContent = Math.round(w / max * 100) + '%';
+            if (pctEl) { pctEl.textContent = chance + '% chance'; pctEl.style.color = col; }
         }
 
         function finalizeMeet() {
