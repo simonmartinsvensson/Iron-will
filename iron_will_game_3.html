@@ -1738,7 +1738,7 @@
                     <button onclick="document.getElementById('importModal').classList.add('active')" style="padding: 4px 10px; font-size: 11px; background: #37474F; color: white; border: none; border-radius: 3px; cursor: pointer;">📥 Import Save</button>
                 </div>
                 <div id="debugInfo" style="font-family: monospace; font-size: 10px; margin-top: 6px;">Ready</div>
-                <div style="font-size: 10px; color: #555; margin-top: 4px;">Last patch: <span style="color:#666;">2026-05-21 14:31</span></div>
+                <div style="font-size: 10px; color: #555; margin-top: 4px;">Last patch: <span style="color:#666;">2026-05-21 15:39</span></div>
             </div>
         </div>
 
@@ -4730,19 +4730,28 @@
         function compLift(s)  { return s < 3 ? 'squat' : s < 6 ? 'bench' : 'deadlift'; }
         function compRound(s) { return s % 3; }
 
+        // Binary search: highest weight (rounded to 2.5kg) where success chance >= target
+        function findWeightForChance(max, target) {
+            let lo = 20, hi = max * 2;
+            for (let i = 0; i < 60; i++) {
+                const mid = (lo + hi) / 2;
+                if (attemptSuccessChance(mid, max, 0, 0) >= target) lo = mid;
+                else hi = mid;
+            }
+            return Math.round(lo / 2.5) * 2.5;
+        }
+
         function applyCompStrategy(preset) {
             if (!compData) return;
             compData.strategy = preset;
-            const pcts = {
-                conservative: [0.87, 0.93, 0.97],
-                moderate:     [0.90, 0.97, 1.02],
-                aggressive:   [0.93, 0.99, 1.05],
-            }[preset];
+            const openerTarget = { conservative: 1.00, moderate: 0.95, aggressive: 0.87 }[preset];
             ['squat','bench','deadlift'].forEach(lift => {
                 const max = compData.lifts[lift].max;
-                pcts.forEach((p, i) => {
-                    compData.lifts[lift].attempts[i] = Math.round(max * p / 2.5) * 2.5;
-                });
+                const opener = findWeightForChance(max, openerTarget);
+                compData.lifts[lift].attempts[0] = opener;
+                // Pre-fill 2nd/3rd as suggestions — player declares these mid-meet
+                compData.lifts[lift].attempts[1] = Math.round(opener * 1.03 / 2.5) * 2.5;
+                compData.lifts[lift].attempts[2] = Math.round(opener * 1.06 / 2.5) * 2.5;
             });
             renderCompModal();
         }
@@ -4778,9 +4787,9 @@
 
         function renderCompOpenerDeclaration(el) {
             const strategies = [
-                { id: 'conservative', label: 'Conservative', sub: 'Opener ~87% of max' },
-                { id: 'moderate',     label: 'Moderate',     sub: 'Opener ~90% of max' },
-                { id: 'aggressive',   label: 'Aggressive',   sub: 'Opener ~93% of max' },
+                { id: 'conservative', label: 'Conservative', sub: '100% success opener' },
+                { id: 'moderate',     label: 'Moderate',     sub: '95% success opener' },
+                { id: 'aggressive',   label: 'Aggressive',   sub: '87% success opener' },
             ];
             let rows = '';
             ['squat','bench','deadlift'].forEach(lift => {
