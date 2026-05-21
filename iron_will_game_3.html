@@ -1738,7 +1738,7 @@
                     <button onclick="document.getElementById('importModal').classList.add('active')" style="padding: 4px 10px; font-size: 11px; background: #37474F; color: white; border: none; border-radius: 3px; cursor: pointer;">📥 Import Save</button>
                 </div>
                 <div id="debugInfo" style="font-family: monospace; font-size: 10px; margin-top: 6px;">Ready</div>
-                <div style="font-size: 10px; color: #555; margin-top: 4px;">Last patch: <span style="color:#666;">2026-05-20 08:47</span></div>
+                <div style="font-size: 10px; color: #555; margin-top: 4px;">Last patch: <span style="color:#666;">2026-05-21 08:50</span></div>
             </div>
         </div>
 
@@ -2244,6 +2244,21 @@
                     }
                 }
                 gameState.intensity = TRAINING_PHASES[gameState.trainingBlock.phase].intensity;
+            }
+
+            // Bodyweight drift toward target
+            if (gameState.targetBodyweight !== undefined) {
+                const bwDiff = gameState.targetBodyweight - gameState.bodyweight;
+                if (Math.abs(bwDiff) > 0.05) {
+                    let driftRate = 0.002;
+                    const dir = Math.sign(bwDiff);
+                    if ((dir > 0 && gameState.nutrition === 'surplus') || (dir < 0 && gameState.nutrition === 'deficit')) driftRate *= 1.6;
+                    else if ((dir > 0 && gameState.nutrition === 'deficit') || (dir < 0 && gameState.nutrition === 'surplus')) driftRate *= 0.3;
+                    const drift = dir * Math.min(driftRate * elapsed, Math.abs(bwDiff));
+                    gameState.bodyweight = gameState.bodyweight + drift;
+                } else {
+                    gameState.bodyweight = gameState.targetBodyweight;
+                }
             }
 
             // Rival progression
@@ -2778,7 +2793,7 @@
                         driftRate *= 0.3; // fighting against
                     }
                     const drift = dir * Math.min(driftRate * delta, Math.abs(bwDiff));
-                    gameState.bodyweight = Math.round((gameState.bodyweight + drift) * 100) / 100;
+                    gameState.bodyweight = gameState.bodyweight + drift;
                 } else {
                     gameState.bodyweight = gameState.targetBodyweight;
                 }
