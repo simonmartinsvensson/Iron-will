@@ -1738,7 +1738,7 @@
                     <button onclick="document.getElementById('importModal').classList.add('active')" style="padding: 4px 10px; font-size: 11px; background: #37474F; color: white; border: none; border-radius: 3px; cursor: pointer;">📥 Import Save</button>
                 </div>
                 <div id="debugInfo" style="font-family: monospace; font-size: 10px; margin-top: 6px;">Ready</div>
-                <div style="font-size: 10px; color: #555; margin-top: 4px;">Last patch: <span style="color:#666;">2026-05-21 08:50</span></div>
+                <div style="font-size: 10px; color: #555; margin-top: 4px;">Last patch: <span style="color:#666;">2026-05-21 13:20</span></div>
             </div>
         </div>
 
@@ -4697,205 +4697,364 @@
             openCompetitionModal();
         }
 
-        // ── Competition ───────────────────────────────────────────────────────
+        // ── Competition (IPF-style interactive) ──────────────────────────────
+        // Steps 0-2: squat rounds 1-3
+        // Steps 3-5: bench rounds 1-3
+        // Steps 6-8: deadlift rounds 1-3
         let compData = null;
 
         function openCompetition() {
             if (gameState.competitionCooldown > 0) return;
-            openChecklist(); // show checklist first
+            openChecklist();
         }
 
         function openCompetitionModal() {
             const sq = Math.floor(gameState.squat);
             const bn = Math.floor(gameState.bench);
             const dl = Math.floor(gameState.deadlift);
-
-            function mkAttempts(max) {
-                return [
-                    Math.round(max * 0.900 / 2.5) * 2.5,
-                    Math.round(max * 0.970 / 2.5) * 2.5,
-                    Math.round(max * 1.025 / 2.5) * 2.5,
-                ];
-            }
-
             compData = {
+                step: -1, // -1 = opener declaration screen
+                momentum: 0,
+                squatFatiguePenalty: 0,
+                strategy: 'moderate',
                 lifts: {
-                    squat:    { attempts: mkAttempts(sq), results: [null,null,null], max: sq },
-                    bench:    { attempts: mkAttempts(bn), results: [null,null,null], max: bn },
-                    deadlift: { attempts: mkAttempts(dl), results: [null,null,null], max: dl },
+                    squat:    { attempts: [0,0,0], results: [null,null,null], max: sq },
+                    bench:    { attempts: [0,0,0], results: [null,null,null], max: bn },
+                    deadlift: { attempts: [0,0,0], results: [null,null,null], max: dl },
                 },
             };
-
-            renderCompSelect();
+            applyCompStrategy('moderate');
             document.getElementById('competitionModal').classList.add('active');
         }
 
-        function attemptSuccessChance(weight, max) {
+        function compLift(s)  { return s < 3 ? 'squat' : s < 6 ? 'bench' : 'deadlift'; }
+        function compRound(s) { return s % 3; }
+
+        function applyCompStrategy(preset) {
+            if (!compData) return;
+            compData.strategy = preset;
+            const pcts = {
+                conservative: [0.87, 0.93, 0.97],
+                moderate:     [0.90, 0.97, 1.02],
+                aggressive:   [0.93, 0.99, 1.05],
+            }[preset];
+            ['squat','bench','deadlift'].forEach(lift => {
+                const max = compData.lifts[lift].max;
+                pcts.forEach((p, i) => {
+                    compData.lifts[lift].attempts[i] = Math.round(max * p / 2.5) * 2.5;
+                });
+            });
+            renderCompModal();
+        }
+
+        function attemptSuccessChance(weight, max, momentumBonus, extraPenalty) {
             const ratio = weight / max;
-            // Base curve: ~93% at 90% of max, reaches 0% at ~142% of max, deeply negative beyond that.
-            // Do NOT clamp base to 0 here — bonuses must not create a floor for unrealistic weights.
+            // Base curve — no inner clamp so absurd weights stay deeply negative
             const base = Math.min(0.97, 0.93 - (ratio - 0.90) * 1.8);
             const techBonus      = (gameState.technique - 50) * 0.003;
             const fatiguePenal   = (gameState.fatigue / 1000) * 0.30;
             const compEdge       = perkCount('comp_edge') * 0.12;
             const checklistBonus = getChecklistBonus();
-            return Math.max(0, base + techBonus - fatiguePenal + compEdge + checklistBonus);
+            const mom            = momentumBonus  || 0;
+            const extra          = extraPenalty   || 0;
+            return Math.max(0, Math.min(1, base + techBonus - fatiguePenal + compEdge + checklistBonus + mom - extra));
         }
 
-        function updateAttemptProb(lift, idx, val) {
-            let w = parseFloat(val);
-            if (isNaN(w) || w <= 0 || !compData) return;
-            // Cap at 5× current max to prevent absurd display values
-            w = Math.min(w, compData.lifts[lift].max * 5);
-            compData.lifts[lift].attempts[idx] = Math.round(w / 2.5) * 2.5;
-            const pct = Math.round(attemptSuccessChance(compData.lifts[lift].attempts[idx], compData.lifts[lift].max) * 100);
-            const col = pct > 70 ? '#4CAF50' : pct > 45 ? '#FF9800' : '#F44336';
-            const probEl = document.getElementById(`prob_${lift}_${idx}`);
-            if (probEl) { probEl.textContent = pct + '%'; probEl.style.color = col; }
+        function momentumLabel(m) {
+            if (m >  0.12) return { text: '🔥 On Fire',   color: '#4CAF50' };
+            if (m >  0.04) return { text: '💪 Confident', color: '#8BC34A' };
+            if (m > -0.04) return { text: '😐 Neutral',   color: '#aaa'    };
+            if (m > -0.10) return { text: '😟 Shaken',    color: '#FF9800' };
+            return               { text: '😰 Rattled',   color: '#F44336' };
         }
 
-        function renderCompSelect() {
+        function renderCompModal() {
             const el = document.getElementById('compModalContent');
             if (!el || !compData) return;
-            const names = { squat: 'Squat', bench: 'Bench', deadlift: 'Deadlift' };
+            if      (compData.step === -1) renderCompOpenerDeclaration(el);
+            else if (compData.step <=   8) renderCompAttempt(el);
+            else                           renderCompFinalResults(el);
+        }
+
+        function renderCompOpenerDeclaration(el) {
+            const strategies = [
+                { id: 'conservative', label: 'Conservative', sub: '87/93/97% — iron safety net' },
+                { id: 'moderate',     label: 'Moderate',     sub: '90/97/102% — balanced' },
+                { id: 'aggressive',   label: 'Aggressive',   sub: '93/99/105% — going for broke' },
+            ];
             let rows = '';
             ['squat','bench','deadlift'].forEach(lift => {
                 const d = compData.lifts[lift];
+                const lName = { squat: 'Squat', bench: 'Bench', deadlift: 'Deadlift' }[lift];
+                rows += `<tr><td style="color:#ddd;font-weight:bold;padding-right:6px;white-space:nowrap;">${lName}</td>`;
                 d.attempts.forEach((w, i) => {
-                    const pct = Math.round(attemptSuccessChance(w, d.max) * 100);
-                    const col = pct > 70 ? '#4CAF50' : pct > 45 ? '#FF9800' : '#F44336';
-                    const label = ['Opener','2nd','3rd'][i];
-                    if (i === 0) rows += `<tr><td rowspan="3" style="color:#ddd;font-weight:bold;vertical-align:middle;padding-right:8px;">${names[lift]}</td>`;
-                    else rows += '<tr>';
-                    rows += `<td style="color:#888;font-size:12px;">${label}</td>
-                        <td><input class="attempt-input" id="att_${lift}_${i}" type="number" value="${w}" min="20" max="1000" step="2.5"
-                            oninput="updateAttemptProb('${lift}',${i},this.value)"></td>
-                        <td id="prob_${lift}_${i}" style="color:${col};font-weight:bold;">${pct}%</td></tr>`;
+                    const pct = Math.round(w / d.max * 100);
+                    const col = pct > 100 ? '#f88' : pct > 97 ? '#FF9800' : '#4CAF50';
+                    rows += `<td style="padding:2px 3px;">
+                        <input class="attempt-input" id="op_${lift}_${i}" type="number"
+                            value="${w}" min="20" max="1000" step="2.5" style="width:65px;"
+                            oninput="updateOpenerInput('${lift}',${i},this.value)">
+                        <div id="op_pct_${lift}_${i}" style="font-size:9px;color:${col};text-align:center;">${pct}%</div>
+                    </td>`;
                 });
+                rows += '</tr>';
             });
             el.innerHTML = `
-                <div class="competition-title">Meet Day — Set Your Attempts</div>
-                <p style="color:#aaa;text-align:center;margin-bottom:12px;font-size:12px;">
-                    Fatigue ${Math.floor(gameState.fatigue)} · Technique ${Math.floor(gameState.technique)}%
-                    ${gameState.peaking > 0 ? ' · <span style="color:#4CAF50;">PEAKING</span>' : ''}
-                    ${getChecklistBonus() > 0 ? ` · <span style="color:#4CAF50;">Prep +${Math.round(getChecklistBonus()*100)}%</span>` : ''}
+                <div class="competition-title">Meet Day — Attempt Declaration</div>
+                <p style="color:#666;font-size:11px;text-align:center;margin-bottom:10px;">
+                    Per IPF rules: declare all openers now. After each lift you declare your next attempt — you can only go up.
                 </p>
-                <table class="attempt-table">
-                    <thead><tr><th>Lift</th><th>Attempt</th><th>Weight</th><th>Est.</th></tr></thead>
+                <div style="display:flex;gap:6px;justify-content:center;margin-bottom:12px;flex-wrap:wrap;">
+                    ${strategies.map(s => `
+                        <div onclick="applyCompStrategy('${s.id}')" style="cursor:pointer;padding:6px 10px;border-radius:6px;border:2px solid ${compData.strategy===s.id?'#4CAF50':'#444'};background:${compData.strategy===s.id?'#1a2a1a':'#1e1e1e'};text-align:center;min-width:90px;">
+                            <div style="font-size:12px;color:#ddd;font-weight:bold;">${s.label}</div>
+                            <div style="font-size:9px;color:#888;margin-top:2px;">${s.sub}</div>
+                        </div>`).join('')}
+                </div>
+                <table style="width:100%;border-collapse:collapse;margin-bottom:10px;">
+                    <thead><tr><th></th><th style="color:#666;font-size:11px;font-weight:normal;text-align:center;">Opener</th><th style="color:#666;font-size:11px;font-weight:normal;text-align:center;">2nd</th><th style="color:#666;font-size:11px;font-weight:normal;text-align:center;">3rd</th></tr></thead>
                     <tbody>${rows}</tbody>
                 </table>
-                <p style="font-size:11px;color:#666;text-align:center;margin:8px 0;">Edit weights above — odds update live. Attempts rounded to 2.5 kg.</p>
-                <div style="display:flex;gap:10px;">
-                    <button class="btn btn-warning" style="flex:2;" onclick="runCompetition()">Compete!</button>
-                    <button class="btn btn-primary" style="flex:1;" onclick="document.getElementById('competitionModal').classList.remove('active')">Cancel</button>
-                </div>
-            `;
+                <div style="display:flex;gap:8px;">
+                    <button class="btn btn-success" style="flex:2;" onclick="compData.step=0;renderCompModal()">Take the Platform →</button>
+                    <button class="btn" style="flex:1;" onclick="document.getElementById('competitionModal').classList.remove('active')">Cancel</button>
+                </div>`;
         }
 
-        function runCompetition() {
+        function updateOpenerInput(lift, idx, val) {
+            const w = Math.round(Math.max(20, parseFloat(val) || 20) / 2.5) * 2.5;
             if (!compData) return;
-            ['squat','bench','deadlift'].forEach(lift => {
-                const d = compData.lifts[lift];
-                d.attempts.forEach((w, i) => {
-                    d.results[i] = Math.random() < attemptSuccessChance(w, d.max);
-                });
-            });
-            renderCompResults();
+            compData.lifts[lift].attempts[idx] = w;
+            const pct = Math.round(w / compData.lifts[lift].max * 100);
+            const col = pct > 100 ? '#f88' : pct > 97 ? '#FF9800' : '#4CAF50';
+            const pctEl = document.getElementById(`op_pct_${lift}_${idx}`);
+            if (pctEl) { pctEl.textContent = pct + '%'; pctEl.style.color = col; }
         }
 
-        function renderCompResults() {
-            const el = document.getElementById('compModalContent');
-            if (!el || !compData) return;
-            const names = { squat: 'Squat', bench: 'Bench', deadlift: 'Deadlift' };
-            let rows = '';
-            let compTotal = 0;
+        function renderCompAttempt(el) {
+            const s = compData.step;
+            const lift = compLift(s), round = compRound(s);
+            const d = compData.lifts[lift];
+            const w = d.attempts[round];
+            const liftName = { squat: 'Squat', bench: 'Bench Press', deadlift: 'Deadlift' }[lift];
+            const roundLabel = ['Opener', '2nd Attempt', '3rd Attempt'][round];
+            const extraPenalty = lift === 'deadlift' ? compData.squatFatiguePenalty : 0;
+            const chance = attemptSuccessChance(w, d.max, compData.momentum, extraPenalty);
+            const chancePct = Math.round(chance * 100);
+            const chanceCol = chancePct > 70 ? '#4CAF50' : chancePct > 45 ? '#FF9800' : '#F44336';
+            const mom = momentumLabel(compData.momentum);
 
+            // Mini scoreboard
+            let scoreRows = '';
+            ['squat','bench','deadlift'].forEach(l => {
+                const ld = compData.lifts[l];
+                const abbr = { squat: 'SQ', bench: 'BP', deadlift: 'DL' }[l];
+                const best = Math.max(0, ...ld.results.map((r,i) => r ? ld.attempts[i] : 0));
+                let cells = ld.results.map((r,i) => {
+                    if (r === null) return `<td style="color:#444;font-size:11px;padding:1px 5px;">${ld.attempts[i]}kg</td>`;
+                    return `<td style="color:${r?'#4CAF50':'#F44336'};font-size:11px;padding:1px 5px;">${r?'✓':'✗'} ${ld.attempts[i]}kg</td>`;
+                }).join('');
+                scoreRows += `<tr><td style="color:#777;font-size:11px;padding:1px 5px;font-weight:bold;">${abbr}</td>${cells}<td style="color:#ddd;font-size:11px;padding:1px 5px;">${best>0?best+'kg':'—'}</td></tr>`;
+            });
+
+            const commands = { squat: '"Squat" … "Rack"', bench: '"Start" … "Press" … "Rack"', deadlift: '"Down"' };
+
+            el.innerHTML = `
+                <div class="competition-title" style="font-size:14px;">${liftName} — ${roundLabel}</div>
+                <div style="text-align:center;margin:10px 0 6px;">
+                    <div style="font-size:32px;font-weight:bold;color:#fff;">${w} kg</div>
+                    <div style="font-size:11px;color:#888;">${Math.round(w/d.max*100)}% of your best · Commands: ${commands[lift]}</div>
+                </div>
+                <div style="display:flex;justify-content:space-between;padding:7px 10px;background:#1a1a1a;border-radius:6px;margin-bottom:8px;">
+                    <div style="font-size:12px;">Momentum: <span style="color:${mom.color};font-weight:bold;">${mom.text}</span></div>
+                    <div style="font-size:12px;color:${chanceCol};font-weight:bold;">${chancePct}%</div>
+                </div>
+                ${lift==='deadlift'&&compData.squatFatiguePenalty>0?`<div style="font-size:11px;color:#FF9800;text-align:center;margin-bottom:8px;">⚠ Heavy squats left fatigue in the legs (−${Math.round(compData.squatFatiguePenalty*100)}% penalty)</div>`:''}
+                <table style="width:100%;border-collapse:collapse;margin-bottom:10px;">
+                    <thead><tr><th></th><th style="color:#555;font-size:10px;">1st</th><th style="color:#555;font-size:10px;">2nd</th><th style="color:#555;font-size:10px;">3rd</th><th style="color:#555;font-size:10px;">Best</th></tr></thead>
+                    <tbody>${scoreRows}</tbody>
+                </table>
+                <button class="btn btn-success" style="width:100%;font-size:15px;padding:12px;" onclick="resolveAttempt()">Attempt Lift</button>`;
+        }
+
+        function resolveAttempt() {
+            const s = compData.step;
+            const lift = compLift(s), round = compRound(s);
+            const d = compData.lifts[lift];
+            const w = d.attempts[round];
+            const extraPenalty = lift === 'deadlift' ? compData.squatFatiguePenalty : 0;
+            const success = Math.random() < attemptSuccessChance(w, d.max, compData.momentum, extraPenalty);
+            d.results[round] = success;
+
+            // Update momentum
+            const momentumDelta = success
+                ? (round === 2 ? 0.06 : 0.03)   // making a lift
+                : (round === 0 ? -0.10 : round === 1 ? -0.05 : -0.02); // missing (opener hurts most)
+            compData.momentum = Math.max(-0.25, Math.min(0.20, compData.momentum + momentumDelta));
+
+            // Record physical squat fatigue that carries to deadlift
+            if (lift === 'squat' && round === 2) {
+                const bestSq = Math.max(0, ...d.results.map((r,i) => r ? d.attempts[i] : 0));
+                const sqPct = bestSq / d.max;
+                compData.squatFatiguePenalty = sqPct >= 0.98 ? 0.08 : sqPct >= 0.90 ? 0.04 : 0.01;
+            }
+
+            // Update personal and competition bests immediately on success
+            if (success) {
+                if (w > gameState[lift]) gameState[lift] = w;
+                if (!gameState.compBests) gameState.compBests = { squat:0, bench:0, deadlift:0, total:0 };
+                if (w > gameState.compBests[lift]) {
+                    gameState.compBests[lift] = w;
+                    if ((gameState.unlockedFeatures||{}).compbests) showNotification(`New comp best ${lift}: ${w}kg!`, 'pr');
+                }
+            }
+
+            renderAttemptResult();
+        }
+
+        function renderAttemptResult() {
+            const el = document.getElementById('compModalContent');
+            const s = compData.step;
+            const lift = compLift(s), round = compRound(s);
+            const d = compData.lifts[lift];
+            const w = d.attempts[round];
+            const success = d.results[round];
+            const liftName = { squat: 'Squat', bench: 'Bench Press', deadlift: 'Deadlift' }[lift];
+            const roundLabel = ['Opener', '2nd Attempt', '3rd Attempt'][round];
+            const mom = momentumLabel(compData.momentum);
+            const isLastRound = round === 2;
+            const isLastStep  = s === 8;
+
+            let nextSection = '';
+            if (isLastStep) {
+                nextSection = `<button class="btn btn-success" style="width:100%;margin-top:12px;" onclick="finalizeMeet()">See Final Results →</button>`;
+            } else if (isLastRound) {
+                const nextLiftName = { squat:'Squat', bench:'Bench Press', deadlift:'Deadlift' }[compLift(s+1)];
+                nextSection = `<button class="btn btn-primary" style="width:100%;margin-top:12px;" onclick="compData.step++;renderCompModal()">Move to ${nextLiftName} →</button>`;
+            } else {
+                // IPF: after good lift must increase; after no-lift can repeat or increase
+                const minNext = success ? w + 2.5 : w;
+                const suggested = Math.round(Math.max(minNext, d.attempts[round+1]) / 2.5) * 2.5;
+                d.attempts[round+1] = suggested;
+                const nextLabel = ['Opener','2nd Attempt','3rd Attempt'][round+1];
+                nextSection = `
+                    <div style="margin-top:10px;padding:10px;background:#1a1a1a;border-radius:6px;">
+                        <div style="font-size:12px;color:#aaa;margin-bottom:4px;">Declare ${nextLabel}:</div>
+                        <div style="font-size:10px;color:#555;margin-bottom:6px;">${success ? `Must be > ${w}kg (good lift — cannot repeat)` : `Must be ≥ ${w}kg (no lift — may repeat)`}</div>
+                        <div style="display:flex;align-items:center;gap:8px;">
+                            <input class="attempt-input" id="next_inp" type="number" value="${suggested}" min="${minNext}" step="2.5" style="width:80px;"
+                                oninput="updateNextAttempt(this.value,${minNext})">
+                            <span id="next_pct" style="font-size:11px;color:#aaa;">${Math.round(suggested/d.max*100)}%</span>
+                        </div>
+                    </div>
+                    <button class="btn btn-primary" style="width:100%;margin-top:8px;" onclick="compData.step++;renderCompModal()">Continue →</button>`;
+            }
+
+            el.innerHTML = `
+                <div class="competition-title" style="font-size:14px;">${liftName} — ${roundLabel}</div>
+                <div style="text-align:center;margin:14px 0 8px;">
+                    <div style="font-size:44px;">${success ? '✅' : '❌'}</div>
+                    <div style="font-size:22px;font-weight:bold;color:${success?'#4CAF50':'#F44336'};">${w}kg — ${success ? 'GOOD LIFT' : 'NO LIFT'}</div>
+                </div>
+                <div style="text-align:center;font-size:12px;margin-bottom:8px;">
+                    Momentum: <span style="color:${mom.color};font-weight:bold;">${mom.text}</span>
+                    ${momentumDeltaText(s, success)}
+                </div>
+                ${nextSection}`;
+        }
+
+        function momentumDeltaText(s, success) {
+            const round = compRound(s);
+            const delta = success ? (round===2?'+6%':'+3%') : (round===0?'−10%':round===1?'−5%':'−2%');
+            const col   = success ? '#4CAF50' : '#F44336';
+            return `<span style="color:${col};font-size:11px;"> (${delta})</span>`;
+        }
+
+        function updateNextAttempt(val, minWeight) {
+            const w = Math.round(Math.max(minWeight, parseFloat(val) || minWeight) / 2.5) * 2.5;
+            const s = compData.step;
+            compData.lifts[compLift(s)].attempts[compRound(s) + 1] = w;
+            const max = compData.lifts[compLift(s)].max;
+            const pctEl = document.getElementById('next_pct');
+            if (pctEl) pctEl.textContent = Math.round(w / max * 100) + '%';
+        }
+
+        function finalizeMeet() {
+            let compTotal = 0;
+            let dnf = false;
             ['squat','bench','deadlift'].forEach(lift => {
                 const d = compData.lifts[lift];
-                let best = 0;
-                d.attempts.forEach((w, i) => {
-                    const ok = d.results[i];
-                    const label = ['Opener','2nd','3rd'][i];
-                    const sym = ok ? '✓' : '✗';
-                    const col = ok ? '#4CAF50' : '#F44336';
-                    if (i === 0) rows += `<tr><td rowspan="3" style="color:#ddd;font-weight:bold;vertical-align:middle;padding-right:8px;">${names[lift]}</td>`;
-                    else rows += '<tr>';
-                    rows += `<td style="color:#888;">${label}</td><td style="color:#fff;">${w}kg</td><td style="color:${col};font-weight:bold;font-size:16px;">${sym}</td></tr>`;
-                    if (ok && w > best) best = w;
-                });
+                const best = Math.max(0, ...d.results.map((r,i) => r ? d.attempts[i] : 0));
                 compTotal += best;
-                // Update personal bests if competition weight exceeded them
-                if (best > gameState[lift]) gameState[lift] = best;
-                // Update competition bests
-                if (!gameState.compBests) gameState.compBests = { squat: 0, bench: 0, deadlift: 0, total: 0 };
-                if (best > gameState.compBests[lift]) {
-                    gameState.compBests[lift] = best;
-                    if ((gameState.unlockedFeatures || {}).compbests) showNotification(`New comp best ${lift}: ${best}kg!`, 'pr');
-                }
+                if (best === 0) dnf = true;
             });
-            // Update comp total best
-            if (!gameState.compBests) gameState.compBests = { squat: 0, bench: 0, deadlift: 0, total: 0 };
+            if (!gameState.compBests) gameState.compBests = { squat:0, bench:0, deadlift:0, total:0 };
             if (compTotal > gameState.compBests.total) gameState.compBests.total = compTotal;
 
             const tier = getHighestAvailableTier();
-            const knowledgeGain = Math.max(10, Math.floor(compTotal / 12 * tier.knowledgeMult));
-            gameState.knowledge += knowledgeGain;
+            const knowledgeGain = dnf ? 0 : Math.max(10, Math.floor(compTotal / 12 * tier.knowledgeMult));
+            if (knowledgeGain) gameState.knowledge += knowledgeGain;
             gameState.competitionsEntered = (gameState.competitionsEntered || 0) + 1;
-            gameState.competitionCooldown = 1800;
-            gameState.motivation = Math.min(100, gameState.motivation + 30);
+            gameState.competitionCooldown = dnf ? 900 : 1800;
+            gameState.motivation = Math.min(100, gameState.motivation + (dnf ? 5 : 30));
             gameState.peaking = 0;
             updateRecords();
+            if (!dnf) gameState.cycleCompWins = (gameState.cycleCompWins || 0) + 1;
 
-            // Track cycle comp wins (for challenges)
-            gameState.cycleCompWins = (gameState.cycleCompWins || 0) + 1;
-
-            // Rival comparison
+            // Rival
             let rivalMsg = '';
-            if (gameState.rival) {
+            if (gameState.rival && !dnf) {
                 const diff = compTotal - Math.floor(gameState.rival.total);
-                if (diff >= 0) {
-                    gameState.motivation = Math.min(100, gameState.motivation + 15);
-                    rivalMsg = `<div style="color:#8f8;font-size:12px;margin-top:4px;">Beat your rival by ${diff} kg! Motivation +15</div>`;
-                } else {
-                    gameState.motivation = Math.max(gameState.motivation - 10, 20);
-                    rivalMsg = `<div style="color:#f88;font-size:12px;margin-top:4px;">${gameState.rival.name}: ${Math.floor(gameState.rival.total)} kg — ${Math.abs(diff)} kg ahead of you.</div>`;
-                }
+                if (diff >= 0) { gameState.motivation = Math.min(100, gameState.motivation + 15); rivalMsg = `<div style="color:#8f8;font-size:12px;margin-top:6px;">Beat rival by ${diff}kg! Motivation +15</div>`; }
+                else           { gameState.motivation = Math.max(gameState.motivation - 10, 20);  rivalMsg = `<div style="color:#f88;font-size:12px;margin-top:6px;">${gameState.rival.name}: ${Math.floor(gameState.rival.total)}kg — ${Math.abs(diff)}kg ahead.</div>`; }
             }
-
-            checkChallenges();
 
             // Federation rank-up
-            if (!gameState.federation) gameState.federation = { rank: 'local' };
-            const tierIdx = FEDERATION_TIERS.findIndex(t => t.id === tier.id);
             let rankUpMsg = '';
-            if (compTotal >= tier.winTarget && tierIdx < FEDERATION_TIERS.length - 1) {
-                const nextTier = FEDERATION_TIERS[tierIdx + 1];
-                const curTotal = gameState.squat + gameState.bench + gameState.deadlift;
-                if (curTotal >= nextTier.minTotal) {
-                    gameState.federation.rank = nextTier.id;
-                    rankUpMsg = `🏅 Promoted to ${nextTier.name} Division!`;
-                    addJournalEntry(`Promoted to ${nextTier.name} Division. The bar keeps getting heavier.`);
+            if (!dnf) {
+                if (!gameState.federation) gameState.federation = { rank: 'local' };
+                const tierIdx = FEDERATION_TIERS.findIndex(t => t.id === tier.id);
+                if (compTotal >= tier.winTarget && tierIdx < FEDERATION_TIERS.length - 1) {
+                    const nextTier = FEDERATION_TIERS[tierIdx + 1];
+                    if (gameState.squat + gameState.bench + gameState.deadlift >= nextTier.minTotal) {
+                        gameState.federation.rank = nextTier.id;
+                        rankUpMsg = `🏅 Promoted to ${nextTier.name} Division!`;
+                        addJournalEntry(`Promoted to ${nextTier.name} Division. The bar keeps getting heavier.`);
+                    }
                 }
             }
-            addJournalEntry(`Competed at a ${tier.name} meet. Hit ${compTotal}kg total. +${knowledgeGain} Knowledge.`);
-
+            addJournalEntry(dnf ? `Bombed out at the meet. Lessons learned.` : `Competed at a ${tier.name} meet. Hit ${compTotal}kg total. +${knowledgeGain} Knowledge.`);
+            checkChallenges();
             checkAchievements();
             updateUI();
             saveGame();
 
+            // Final results screen
+            const el = document.getElementById('compModalContent');
+            let rows = '';
+            ['squat','bench','deadlift'].forEach(lift => {
+                const d = compData.lifts[lift];
+                const lName = { squat: 'Squat', bench: 'Bench', deadlift: 'Deadlift' }[lift];
+                d.results.forEach((r, i) => {
+                    const col = r ? '#4CAF50' : '#F44336';
+                    const sym = r ? '✓' : '✗';
+                    if (i === 0) rows += `<tr><td rowspan="3" style="color:#ddd;font-weight:bold;vertical-align:middle;padding-right:8px;">${lName}</td>`;
+                    else rows += '<tr>';
+                    rows += `<td style="color:#888;font-size:12px;">${['Opener','2nd','3rd'][i]}</td><td style="color:#fff;">${d.attempts[i]}kg</td><td style="color:${col};font-weight:bold;font-size:16px;">${sym}</td></tr>`;
+                });
+            });
             el.innerHTML = `
-                <div class="competition-title">Results</div>
+                <div class="competition-title">${dnf ? '❌ Did Not Total' : '🏆 Results'}</div>
                 <table class="attempt-table">
                     <thead><tr><th>Lift</th><th>Attempt</th><th>Weight</th><th>Result</th></tr></thead>
                     <tbody>${rows}</tbody>
                 </table>
-                <div class="comp-total">${compTotal}kg Total</div>
-                <div class="comp-knowledge-gain">+${knowledgeGain} Knowledge earned${rankUpMsg ? '<br>' + rankUpMsg : ''}</div>
+                <div class="comp-total">${dnf ? 'DNF — bombed out' : compTotal + 'kg Total'}</div>
+                ${knowledgeGain ? `<div class="comp-knowledge-gain">+${knowledgeGain} Knowledge earned${rankUpMsg ? '<br>' + rankUpMsg : ''}</div>` : ''}
                 ${rivalMsg}
                 <div style="text-align:center;margin-top:10px;">
                     <button class="btn btn-success" onclick="document.getElementById('competitionModal').classList.remove('active');updateUI();">Done</button>
-                </div>
-            `;
+                </div>`;
         }
 
         // Event listeners
