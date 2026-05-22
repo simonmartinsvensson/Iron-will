@@ -1739,7 +1739,7 @@
                     <button onclick="document.getElementById('importModal').classList.add('active')" style="padding: 4px 10px; font-size: 11px; background: #37474F; color: white; border: none; border-radius: 3px; cursor: pointer;">📥 Import Save</button>
                 </div>
                 <div id="debugInfo" style="font-family: monospace; font-size: 10px; margin-top: 6px;">Ready</div>
-                <div style="font-size: 10px; color: #555; margin-top: 4px;">Last patch: <span style="color:#666;">2026-05-22 13:16</span></div>
+                <div style="font-size: 10px; color: #555; margin-top: 4px;">Last patch: <span style="color:#666;">2026-05-22 13:34</span></div>
             </div>
         </div>
 
@@ -5185,6 +5185,19 @@
                 <div class="comp-total">${dnf ? 'DNF — bombed out' : compTotal + 'kg Total'}</div>
                 ${knowledgeGain ? `<div class="comp-knowledge-gain">+${knowledgeGain} Knowledge earned${rankUpMsg ? '<br>' + rankUpMsg : ''}</div>` : ''}
                 ${rivalMsg}
+                ${(() => {
+                    if (dnf || rankUpMsg) return '';
+                    const curRank = (gameState.federation && gameState.federation.rank) || 'local';
+                    const curTierIdx = FEDERATION_TIERS.findIndex(t => t.id === curRank);
+                    const curTierObj = FEDERATION_TIERS[curTierIdx];
+                    if (curTierIdx >= FEDERATION_TIERS.length - 1) return '<div style="font-size:11px;color:#FFD700;text-align:center;margin-top:6px;">🌍 World Division — peak of the sport</div>';
+                    const nextTierObj = FEDERATION_TIERS[curTierIdx + 1];
+                    const needed = curTierObj.winTarget - compTotal;
+                    if (needed <= 0) return '';
+                    const trainTotal = gameState.squat + gameState.bench + gameState.deadlift;
+                    const trainLock = trainTotal < nextTierObj.minTotal ? ` (also need ${nextTierObj.minTotal}kg training total)` : '';
+                    return \`<div style="font-size:11px;color:#888;text-align:center;margin-top:6px;">Advance to ${nextTierObj.name}: need <span style="color:#FF9800;">${needed}kg more</span> total${trainLock}</div>\`;
+                })()}
                 <div style="text-align:center;margin-top:10px;">
                     <button class="btn btn-success" onclick="document.getElementById('competitionModal').classList.remove('active');updateUI();">Done</button>
                 </div>`;
