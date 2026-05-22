@@ -1738,7 +1738,7 @@
                     <button onclick="document.getElementById('importModal').classList.add('active')" style="padding: 4px 10px; font-size: 11px; background: #37474F; color: white; border: none; border-radius: 3px; cursor: pointer;">📥 Import Save</button>
                 </div>
                 <div id="debugInfo" style="font-family: monospace; font-size: 10px; margin-top: 6px;">Ready</div>
-                <div style="font-size: 10px; color: #555; margin-top: 4px;">Last patch: <span style="color:#666;">2026-05-22 10:01</span></div>
+                <div style="font-size: 10px; color: #555; margin-top: 4px;">Last patch: <span style="color:#666;">2026-05-22 10:44</span></div>
             </div>
         </div>
 
@@ -2408,18 +2408,17 @@
             document.getElementById('adaptationBar').style.width = adaptPercent + '%';
             document.getElementById('adaptationPercent').textContent = Math.floor(adaptPercent) + '%';
             
-            // Convert button
+            // Convert button — use innerHTML so the inner span is never destroyed
             const convertBtn = document.getElementById('convertBtn');
             const adaptReady = gameState.adaptation >= adaptCost;
             convertBtn.disabled = !adaptReady;
-            document.getElementById('convertCost').textContent = adaptCost;
             if (adaptReady) {
                 convertBtn.style.background = '';
-                convertBtn.textContent = `Convert Adaptation (Cost: ${adaptCost})`;
+                convertBtn.innerHTML = `Convert Adaptation (Cost: <span id="convertCost">${adaptCost}</span>)`;
             } else {
                 const fillPct = Math.round((gameState.adaptation / adaptCost) * 100);
                 convertBtn.style.background = `linear-gradient(to right, #1565C0 ${fillPct}%, #0d1a2a ${fillPct}%)`;
-                convertBtn.textContent = `Convert Adaptation — ${fillPct}%`;
+                convertBtn.innerHTML = `Convert Adaptation — ${fillPct}% <span id="convertCost" style="display:none">${adaptCost}</span>`;
             }
 
             // Convert Max button
