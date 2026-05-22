@@ -1756,7 +1756,7 @@
                     <button onclick="document.getElementById('importModal').classList.add('active')" style="padding: 4px 10px; font-size: 11px; background: #37474F; color: white; border: none; border-radius: 3px; cursor: pointer;">📥 Import Save</button>
                 </div>
                 <div id="debugInfo" style="font-family: monospace; font-size: 10px; margin-top: 6px;">Ready</div>
-                <div style="font-size: 10px; color: #555; margin-top: 4px;">Last patch: <span style="color:#666;">2026-05-22 14:08</span></div>
+                <div style="font-size: 10px; color: #555; margin-top: 4px;">Last patch: <span style="color:#666;">2026-05-22 14:51</span></div>
             </div>
         </div>
 
@@ -3188,6 +3188,7 @@
             gameState.peaking = 0;
             gameState.peakingUsed = false;
             gameState.season = null; // fresh season goal each cycle
+            gameState.federation = { rank: 'local' }; // rank resets with stats
 
             document.getElementById('prestigeModal').classList.remove('active');
 
@@ -4490,6 +4491,7 @@
             gameState.peaking = 0;
             gameState.peakingUsed = false;
             gameState.season = null;
+            gameState.federation = { rank: 'local' }; // rank resets with stats
 
             document.getElementById('retirementModal').classList.remove('active');
             addJournalEntry(`Final meet. The platform one last time. Knowledge: +${knowledgeGain}.`);
@@ -5075,13 +5077,14 @@
                 meetBest[l] = Math.max(0, ...ld.results.map((r,i) => r ? ld.attempts[i] : 0));
             });
             const meetTotal   = meetBest.squat + meetBest.bench + meetBest.deadlift;
-            const trainPR     = { squat: gameState.squat, bench: gameState.bench, deadlift: gameState.deadlift };
             const compPR      = gameState.compBests || { squat:0, bench:0, deadlift:0, total:0 };
-            const trainTotal  = trainPR.squat + trainPR.bench + trainPR.deadlift;
+            const trainTotal  = gameState.squat + gameState.bench + gameState.deadlift;
             const liftBest    = meetBest[lift];
-            const isNewTrain  = success && liftBest > 0 && liftBest >= trainPR[lift];
-            const isNewComp   = success && liftBest > 0 && liftBest >= (compPR[lift] || 0);
-            const isNewTotal  = meetTotal > 0 && meetTotal >= (compPR.total || 0);
+            // Use the pre-competition max (stored at meet start) to correctly detect new PRs
+            const prBeforeComp = compData.lifts[lift].max;
+            const isNewTrain  = success && liftBest > prBeforeComp;
+            const isNewComp   = success && liftBest > 0 && liftBest > (compPR[lift] || 0);
+            const isNewTotal  = meetTotal > 0 && meetTotal > (compPR.total || 0);
 
             const prBlock = `
                 <div style="padding:8px 10px;background:#1a1a1a;border-radius:6px;margin-bottom:8px;font-size:11px;">
@@ -5090,7 +5093,7 @@
                         <span style="font-weight:bold;color:#ddd;">${liftBest > 0 ? liftBest+'kg' : '—'}</span>
                     </div>
                     <div style="display:flex;gap:16px;color:#666;">
-                        <span>Training PR: <span style="color:${isNewTrain?'#FFD700':'#aaa'};">${trainPR[lift]}kg${isNewTrain?' ✨':''}</span></span>
+                        <span>Training PR: <span style="color:${isNewTrain?'#FFD700':'#aaa'};">${gameState[lift]}kg${isNewTrain?' ✨':''}</span></span>
                         <span>Comp PR: <span style="color:${isNewComp?'#FFD700':'#aaa'};">${compPR[lift]?compPR[lift]+'kg':'—'}${isNewComp?' ✨':''}</span></span>
                     </div>
                     ${meetTotal > 0 ? `<div style="border-top:1px solid #2a2a2a;margin-top:6px;padding-top:6px;display:flex;justify-content:space-between;align-items:center;">
@@ -5151,7 +5154,7 @@
             if (!gameState.compBests) gameState.compBests = { squat:0, bench:0, deadlift:0, total:0 };
             if (compTotal > gameState.compBests.total) gameState.compBests.total = compTotal;
 
-            const tier = getHighestAvailableTier();
+            const tier = getCurrentTier();
             const knowledgeGain = dnf ? 0 : Math.max(10, Math.floor(compTotal / 12 * tier.knowledgeMult));
             if (knowledgeGain) gameState.knowledge += knowledgeGain;
             gameState.competitionsEntered = (gameState.competitionsEntered || 0) + 1;
