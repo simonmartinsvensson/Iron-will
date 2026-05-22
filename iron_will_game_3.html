@@ -833,11 +833,13 @@
 
         .prestige-content {
             background: #2a2a2a;
-            padding: 40px;
+            padding: 25px;
             border-radius: 12px;
             max-width: 500px;
+            width: 92%;
             text-align: center;
             border: 3px solid #9C27B0;
+            overflow-x: hidden;
         }
 
         .prestige-title {
@@ -864,8 +866,9 @@
 
         .prestige-buttons {
             display: flex;
-            gap: 15px;
+            gap: 10px;
             margin-top: 20px;
+            flex-wrap: wrap;
         }
 
         /* Perk modal */
@@ -878,7 +881,8 @@
         .perk-modal.active { display: flex; }
         .perk-content {
             background: #1a1a1a; border: 2px solid #9C27B0; border-radius: 12px;
-            max-width: 500px; width: 92%; padding: 30px;
+            max-width: 500px; width: 92%; padding: 20px;
+            overflow-x: hidden;
             animation: storyFadeIn 0.4s ease;
         }
         .perk-title { font-size: 20px; font-weight: bold; color: #CE93D8; text-align: center; margin-bottom: 6px; }
@@ -968,7 +972,8 @@
             border-radius: 12px;
             max-width: 480px;
             width: 92%;
-            padding: 35px;
+            padding: 25px;
+            overflow-x: hidden;
             animation: storyFadeIn 0.5s ease;
         }
 
@@ -1442,17 +1447,19 @@
             border: 3px solid #FF9800;
             max-height: 90vh;
             overflow-y: auto;
+            overflow-x: hidden;
             box-sizing: border-box;
         }
 
         .competition-title {
-            font-size: 22px;
+            font-size: 20px;
             font-weight: bold;
             color: #FF9800;
             text-align: center;
             text-transform: uppercase;
-            letter-spacing: 2px;
+            letter-spacing: 1px;
             margin-bottom: 15px;
+            word-break: break-word;
         }
 
         .attempt-table {
@@ -1495,6 +1502,16 @@
         }
 
         /* Responsive */
+        @media (max-width: 420px) {
+            .prestige-content, .story-content, .perk-content, .competition-content {
+                padding: 15px;
+            }
+            .competition-title { font-size: 16px; letter-spacing: 0; }
+            .prestige-title { font-size: 24px; }
+            .prestige-buttons { flex-direction: column; }
+            .prestige-buttons .btn { flex: unset !important; width: 100%; }
+        }
+
         @media (max-width: 600px) {
             .strength-display {
                 flex-direction: column;
@@ -1739,7 +1756,7 @@
                     <button onclick="document.getElementById('importModal').classList.add('active')" style="padding: 4px 10px; font-size: 11px; background: #37474F; color: white; border: none; border-radius: 3px; cursor: pointer;">📥 Import Save</button>
                 </div>
                 <div id="debugInfo" style="font-family: monospace; font-size: 10px; margin-top: 6px;">Ready</div>
-                <div style="font-size: 10px; color: #555; margin-top: 4px;">Last patch: <span style="color:#666;">2026-05-22 13:40</span></div>
+                <div style="font-size: 10px; color: #555; margin-top: 4px;">Last patch: <span style="color:#666;">2026-05-22 14:08</span></div>
             </div>
         </div>
 
@@ -4880,7 +4897,7 @@
                 const chance = Math.round(attemptSuccessChance(w, d.max, 0, 0) * 100);
                 const col = chance > 70 ? '#4CAF50' : chance > 45 ? '#FF9800' : '#f88';
                 rows += `<tr>
-                    <td style="color:#ddd;font-weight:bold;padding-right:10px;white-space:nowrap;">${lName}</td>
+                    <td style="color:#ddd;font-weight:bold;padding-right:8px;">${lName}</td>
                     <td style="padding:2px 3px;">
                         <input class="attempt-input" id="op_${lift}_0" type="number"
                             value="${w}" min="20" max="1000" step="2.5" style="width:80px;"
@@ -5158,19 +5175,19 @@
             }
 
             // Federation rank-up (WR%-based — weight class neutral)
+            // Uses CURRENT federation rank (not training tier) so you advance step by step
             const compWRPct = getWRPct(compTotal);
             let rankUpMsg = '';
             if (!dnf) {
                 if (!gameState.federation) gameState.federation = { rank: 'local' };
-                const tierIdx = FEDERATION_TIERS.findIndex(t => t.id === tier.id);
-                if (compWRPct >= tier.winWRPct && tierIdx < FEDERATION_TIERS.length - 1) {
-                    const nextTier = FEDERATION_TIERS[tierIdx + 1];
-                    const trainPct = getWRPct(gameState.squat + gameState.bench + gameState.deadlift);
-                    if (trainPct >= nextTier.minWRPct) {
-                        gameState.federation.rank = nextTier.id;
-                        rankUpMsg = `🏅 Promoted to ${nextTier.name} Division!`;
-                        addJournalEntry(`Promoted to ${nextTier.name} Division. The bar keeps getting heavier.`);
-                    }
+                const curRankId = gameState.federation.rank || 'local';
+                const curTierIdx = FEDERATION_TIERS.findIndex(t => t.id === curRankId);
+                const curTierObj = FEDERATION_TIERS[curTierIdx];
+                if (curTierObj && compWRPct >= curTierObj.winWRPct && curTierIdx < FEDERATION_TIERS.length - 1) {
+                    const nextTier = FEDERATION_TIERS[curTierIdx + 1];
+                    gameState.federation.rank = nextTier.id;
+                    rankUpMsg = `🏅 Promoted to ${nextTier.name} Division!`;
+                    addJournalEntry(`Promoted to ${nextTier.name} Division. The bar keeps getting heavier.`);
                 }
             }
             addJournalEntry(dnf ? `Bombed out at the meet. Lessons learned.` : `Competed at a ${tier.name} meet. Hit ${compTotal}kg total. +${knowledgeGain} Knowledge.`);
