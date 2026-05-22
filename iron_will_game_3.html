@@ -1756,7 +1756,7 @@
                     <button onclick="document.getElementById('importModal').classList.add('active')" style="padding: 4px 10px; font-size: 11px; background: #37474F; color: white; border: none; border-radius: 3px; cursor: pointer;">📥 Import Save</button>
                 </div>
                 <div id="debugInfo" style="font-family: monospace; font-size: 10px; margin-top: 6px;">Ready</div>
-                <div style="font-size: 10px; color: #555; margin-top: 4px;">Last patch: <span style="color:#666;">2026-05-22 14:51</span></div>
+                <div style="font-size: 10px; color: #555; margin-top: 4px;">Last patch: <span style="color:#666;">2026-05-22 14:56</span></div>
             </div>
         </div>
 
@@ -2346,6 +2346,7 @@
                 document.getElementById('importModal').classList.remove('active');
                 document.getElementById('importSaveText').value = '';
                 loadGame();
+                applyOfflineProgress();
                 document.getElementById('intensitySlider').value = gameState.intensity || 80;
                 setFocus(gameState.trainingFocus);
                 updateUIVisibility();
@@ -3069,6 +3070,7 @@
             // One big confetti burst
             createConfetti();
             createConfetti();
+            updateRecords();
             updateUI();
         }
 
@@ -3187,8 +3189,10 @@
             gameState.hadChronic = false;
             gameState.peaking = 0;
             gameState.peakingUsed = false;
-            gameState.season = null; // fresh season goal each cycle
-            gameState.federation = { rank: 'local' }; // rank resets with stats
+            gameState.season = null;
+            gameState.federation = { rank: 'local' };
+            gameState.signatureLift = null; // re-earned each cycle
+            gameState.compBests = { squat: 0, bench: 0, deadlift: 0, total: 0 }; // fresh per-cycle comp records
 
             document.getElementById('prestigeModal').classList.remove('active');
 
@@ -4491,7 +4495,9 @@
             gameState.peaking = 0;
             gameState.peakingUsed = false;
             gameState.season = null;
-            gameState.federation = { rank: 'local' }; // rank resets with stats
+            gameState.federation = { rank: 'local' };
+            gameState.signatureLift = null;
+            gameState.compBests = { squat: 0, bench: 0, deadlift: 0, total: 0 };
 
             document.getElementById('retirementModal').classList.remove('active');
             addJournalEntry(`Final meet. The platform one last time. Knowledge: +${knowledgeGain}.`);
