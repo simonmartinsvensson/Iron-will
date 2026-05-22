@@ -1738,7 +1738,7 @@
                     <button onclick="document.getElementById('importModal').classList.add('active')" style="padding: 4px 10px; font-size: 11px; background: #37474F; color: white; border: none; border-radius: 3px; cursor: pointer;">📥 Import Save</button>
                 </div>
                 <div id="debugInfo" style="font-family: monospace; font-size: 10px; margin-top: 6px;">Ready</div>
-                <div style="font-size: 10px; color: #555; margin-top: 4px;">Last patch: <span style="color:#666;">2026-05-22 10:44</span></div>
+                <div style="font-size: 10px; color: #555; margin-top: 4px;">Last patch: <span style="color:#666;">2026-05-22 12:00</span></div>
             </div>
         </div>
 
@@ -3913,18 +3913,60 @@
         ];
 
         const ACHIEVEMENT_DEFS = [
-            { id: 'firstPR',     name: 'First Blood',     desc: 'Hit your first PR',            icon: '🩸', check: gs => gs.prCount >= 1 },
-            { id: 'total300',    name: 'Getting Serious', desc: '300kg total',                  icon: '📈', check: gs => gs.squat+gs.bench+gs.deadlift >= 300 },
-            { id: 'total400',    name: 'The Platform',    desc: '400kg total',                  icon: '🏟️', check: gs => gs.squat+gs.bench+gs.deadlift >= 400 },
-            { id: 'total500',    name: 'Elite',           desc: '500kg total',                  icon: '⭐', check: gs => gs.squat+gs.bench+gs.deadlift >= 500 },
-            { id: 'total600',    name: 'Iron Will',       desc: '600kg total',                  icon: '🔱', check: gs => gs.squat+gs.bench+gs.deadlift >= 600 },
-            { id: 'pr100',       name: 'Century',         desc: '100 total PRs',                icon: '💯', check: gs => ((gs.legacy && gs.legacy.allTimePRs || 0) + (gs.prCount || 0)) >= 100 },
-            { id: 'pr500',       name: 'Volume King',     desc: '500 total PRs',                icon: '👑', check: gs => ((gs.legacy && gs.legacy.allTimePRs || 0) + (gs.prCount || 0)) >= 500 },
-            { id: 'veteran',     name: 'Veteran',         desc: 'Complete 3 prestige cycles',   icon: '🎖️', check: gs => gs.prestigeCount >= 4 },
-            { id: 'highFatigue', name: 'Overreacher',     desc: 'Survive 900 fatigue',          icon: '💀', check: gs => gs.fatigue >= 900 },
-            { id: 'allGear',     name: 'Geared Up',       desc: 'Own all equipment',            icon: '🎽', check: gs => gs.equipment && Object.values(gs.equipment).every(v => v) },
-            { id: 'competition1',name: 'Competition Day', desc: 'Enter your first competition', icon: '🏆', check: gs => (gs.competitionsEntered || 0) >= 1 },
-            { id: 'dots400',     name: 'DOTS 400',        desc: 'Achieve DOTS score of 400+',   icon: '🌟', check: gs => getDOTS(gs.squat+gs.bench+gs.deadlift, gs.bodyweight||83) >= 400 },
+            // ── Early / core ──────────────────────────────────────────────────
+            { id: 'firstPR',     name: 'First Blood',      desc: 'Hit your first PR',             icon: '🩸', check: gs => gs.prCount >= 1 },
+            { id: 'highFatigue', name: 'Overreacher',      desc: 'Survive 900 fatigue',           icon: '💀', check: gs => gs.fatigue >= 900 },
+            { id: 'allGear',     name: 'Geared Up',        desc: 'Own all equipment',             icon: '🎽', check: gs => gs.equipment && Object.values(gs.equipment).every(v => v) },
+
+            // ── Total milestones ──────────────────────────────────────────────
+            { id: 'total300',    name: 'Getting Serious',  desc: '300kg total',                   icon: '📈', check: gs => gs.squat+gs.bench+gs.deadlift >= 300 },
+            { id: 'total400',    name: 'The Platform',     desc: '400kg total',                   icon: '🏟️', check: gs => gs.squat+gs.bench+gs.deadlift >= 400 },
+            { id: 'total500',    name: 'Elite',            desc: '500kg total',                   icon: '⭐', check: gs => gs.squat+gs.bench+gs.deadlift >= 500 },
+            { id: 'total600',    name: 'Iron Will',        desc: '600kg total',                   icon: '🔱', check: gs => gs.squat+gs.bench+gs.deadlift >= 600 },
+            { id: 'total700',    name: 'Seven Plates',     desc: '700kg total',                   icon: '⚡', check: gs => gs.squat+gs.bench+gs.deadlift >= 700 },
+            { id: 'total800',    name: 'Machine',          desc: '800kg total',                   icon: '🤖', check: gs => gs.squat+gs.bench+gs.deadlift >= 800 },
+            { id: 'total900',    name: 'Superhuman',       desc: '900kg total',                   icon: '🦾', check: gs => gs.squat+gs.bench+gs.deadlift >= 900 },
+
+            // ── Individual lift milestones ─────────────────────────────────────
+            { id: 'squat200',    name: 'Double Plate Squat', desc: '200kg squat',                 icon: '🦵', check: gs => gs.squat >= 200 },
+            { id: 'squat250',    name: 'Quarter Ton Squat',  desc: '250kg squat',                 icon: '🏋️', check: gs => gs.squat >= 250 },
+            { id: 'bench150',    name: 'Big Bench',          desc: '150kg bench',                 icon: '💪', check: gs => gs.bench >= 150 },
+            { id: 'bench200',    name: 'Double Plate Bench', desc: '200kg bench',                 icon: '🔥', check: gs => gs.bench >= 200 },
+            { id: 'deadlift250', name: 'Heavy Puller',       desc: '250kg deadlift',              icon: '⛓️', check: gs => gs.deadlift >= 250 },
+            { id: 'deadlift300', name: '300 Club',           desc: '300kg deadlift',              icon: '⚓', check: gs => gs.deadlift >= 300 },
+
+            // ── Weight class ──────────────────────────────────────────────────
+            { id: 'wc_59',       name: 'Paper Weight',     desc: 'Cut down to the 59kg class',   icon: '🪶', check: gs => (gs.bodyweight||83) <= 59 },
+            { id: 'wc_66',       name: 'Featherweight',    desc: 'Compete in the 66kg class',    icon: '🐦', check: gs => (gs.bodyweight||83) <= 66 },
+            { id: 'wc_120p',     name: 'Super Heavy',      desc: 'Bulk into the 120+ class',     icon: '🦣', check: gs => (gs.bodyweight||83) > 120 },
+            { id: 'wc_change',   name: 'Weight Mover',     desc: 'Move to a different weight class', icon: '⚖️',
+              check: gs => getWeightClassIndex(gs.bodyweight||83) !== getWeightClassIndex(gs.weightJourneyStart||gs.bodyweight||83) },
+
+            // ── DOTS ─────────────────────────────────────────────────────────
+            { id: 'dots400',     name: 'DOTS 400',         desc: 'DOTS score of 400+',            icon: '🌟', check: gs => getDOTS(gs.squat+gs.bench+gs.deadlift, gs.bodyweight||83) >= 400 },
+            { id: 'dots500',     name: 'DOTS 500',         desc: 'DOTS score of 500+',            icon: '💫', check: gs => getDOTS(gs.squat+gs.bench+gs.deadlift, gs.bodyweight||83) >= 500 },
+            { id: 'dots600',     name: 'DOTS 600',         desc: 'DOTS score of 600+ — elite of the elite', icon: '🌠', check: gs => getDOTS(gs.squat+gs.bench+gs.deadlift, gs.bodyweight||83) >= 600 },
+
+            // ── Competition ───────────────────────────────────────────────────
+            { id: 'competition1',name: 'Competition Day',  desc: 'Enter your first competition',  icon: '🏆', check: gs => (gs.competitionsEntered||0) >= 1 },
+            { id: 'comp5',       name: 'Platform Regular', desc: 'Enter 5 competitions',          icon: '🏅', check: gs => (gs.competitionsEntered||0) >= 5 },
+            { id: 'comp10',      name: 'Seasoned Veteran', desc: 'Enter 10 competitions',         icon: '🎗️', check: gs => (gs.competitionsEntered||0) >= 10 },
+            { id: 'perfect_meet',name: 'Perfect Meet',     desc: 'Go 9 for 9 on attempts',        icon: '✨', check: gs => (gs.perfectMeets||0) >= 1 },
+
+            // ── Federation rank ───────────────────────────────────────────────
+            { id: 'rank_regional', name: 'Regional Circuit',   desc: 'Qualify for Regional division', icon: '🥈', check: gs => ['regional','national','world'].includes(gs.federation && gs.federation.rank) },
+            { id: 'rank_national', name: 'National Stage',     desc: 'Reach National division',       icon: '🥇', check: gs => ['national','world'].includes(gs.federation && gs.federation.rank) },
+            { id: 'rank_world',    name: 'World Stage',        desc: 'Reach World division',          icon: '🌍', check: gs => gs.federation && gs.federation.rank === 'world' },
+
+            // ── PR milestones ─────────────────────────────────────────────────
+            { id: 'pr100',       name: 'Century',          desc: '100 total PRs',                 icon: '💯', check: gs => ((gs.legacy && gs.legacy.allTimePRs||0) + (gs.prCount||0)) >= 100 },
+            { id: 'pr500',       name: 'Volume King',      desc: '500 total PRs',                 icon: '👑', check: gs => ((gs.legacy && gs.legacy.allTimePRs||0) + (gs.prCount||0)) >= 500 },
+            { id: 'pr1000',      name: 'Dedicated',        desc: '1,000 all-time PRs',            icon: '🔥', check: gs => ((gs.legacy && gs.legacy.allTimePRs||0) + (gs.prCount||0)) >= 1000 },
+
+            // ── Prestige / legacy ─────────────────────────────────────────────
+            { id: 'veteran',     name: 'Veteran',          desc: 'Complete 3 prestige cycles',    icon: '🎖️', check: gs => gs.prestigeCount >= 4 },
+            { id: 'prestige5',   name: 'Serial Athlete',   desc: 'Complete 5 prestige cycles',    icon: '🎭', check: gs => gs.prestigeCount >= 5 },
+            { id: 'prestige10',  name: 'Lifer',            desc: 'Complete 10 prestige cycles',   icon: '♾️', check: gs => gs.prestigeCount >= 10 },
         ];
 
         const FOCUS_WEIGHTS = {
@@ -4739,14 +4781,31 @@
         function compRound(s) { return s % 3; }
 
         // Binary search: highest weight (rounded to 2.5kg) where success chance >= target
-        function findWeightForChance(max, target) {
+        function findWeightForChance(max, target, momentum, extraPenalty) {
+            const mom   = momentum    || 0;
+            const extra = extraPenalty || 0;
             let lo = 20, hi = max * 2;
             for (let i = 0; i < 60; i++) {
                 const mid = (lo + hi) / 2;
-                if (attemptSuccessChance(mid, max, 0, 0) >= target) lo = mid;
+                if (attemptSuccessChance(mid, max, mom, extra) >= target) lo = mid;
                 else hi = mid;
             }
             return Math.round(lo / 2.5) * 2.5;
+        }
+
+        function applyNextAttemptPreset(preset, minNext) {
+            if (!compData) return;
+            const s = compData.step;
+            const lift = compLift(s);
+            const d = compData.lifts[lift];
+            const extraPenalty = lift === 'deadlift' ? compData.squatFatiguePenalty : 0;
+            const target = { conservative: 1.00, moderate: 0.95, aggressive: 0.87 }[preset];
+            const raw = findWeightForChance(d.max, target, compData.momentum, extraPenalty);
+            const w = Math.round(Math.max(minNext, raw) / 2.5) * 2.5;
+            d.attempts[compRound(s) + 1] = w;
+            const inp = document.getElementById('next_inp');
+            if (inp) inp.value = w;
+            updateNextAttempt(w, minNext);
         }
 
         function applyCompStrategy(preset) {
@@ -4962,8 +5021,13 @@
                 const nextLabel = ['Opener','2nd Attempt','3rd Attempt'][round+1];
                 nextSection = `
                     <div style="margin-top:10px;padding:10px;background:#1a1a1a;border-radius:6px;">
-                        <div style="font-size:12px;color:#aaa;margin-bottom:4px;">Declare ${nextLabel}:</div>
-                        <div style="font-size:10px;color:#555;margin-bottom:6px;">${success ? `Must be > ${w}kg (good lift — cannot repeat)` : `Must be ≥ ${w}kg (no lift — may repeat)`}</div>
+                        <div style="font-size:12px;color:#aaa;margin-bottom:6px;">Declare ${nextLabel}:</div>
+                        <div style="font-size:10px;color:#555;margin-bottom:8px;">${success ? `Must be > ${w}kg (good lift — cannot repeat)` : `Must be ≥ ${w}kg (no lift — may repeat)`}</div>
+                        <div style="display:flex;gap:4px;margin-bottom:8px;">
+                            <button class="btn" style="flex:1;font-size:10px;padding:5px 2px;" onclick="applyNextAttemptPreset('conservative',${minNext})">🛡 Safe</button>
+                            <button class="btn" style="flex:1;font-size:10px;padding:5px 2px;" onclick="applyNextAttemptPreset('moderate',${minNext})">⚖ Moderate</button>
+                            <button class="btn" style="flex:1;font-size:10px;padding:5px 2px;" onclick="applyNextAttemptPreset('aggressive',${minNext})">⚔ Aggressive</button>
+                        </div>
                         <div style="display:flex;align-items:center;gap:8px;">
                             <input class="attempt-input" id="next_inp" type="number" value="${suggested}" min="${minNext}" step="2.5" style="width:80px;"
                                 oninput="updateNextAttempt(this.value,${minNext})">
@@ -5060,6 +5124,11 @@
             const knowledgeGain = dnf ? 0 : Math.max(10, Math.floor(compTotal / 12 * tier.knowledgeMult));
             if (knowledgeGain) gameState.knowledge += knowledgeGain;
             gameState.competitionsEntered = (gameState.competitionsEntered || 0) + 1;
+            // Track perfect meets (9/9)
+            if (!dnf) {
+                const perfect = ['squat','bench','deadlift'].every(l => compData.lifts[l].results.every(r => r === true));
+                if (perfect) gameState.perfectMeets = (gameState.perfectMeets || 0) + 1;
+            }
             gameState.competitionCooldown = dnf ? 900 : 1800;
             gameState.motivation = Math.min(100, gameState.motivation + (dnf ? 5 : 30));
             gameState.peaking = 0;
