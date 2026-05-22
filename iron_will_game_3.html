@@ -1739,7 +1739,7 @@
                     <button onclick="document.getElementById('importModal').classList.add('active')" style="padding: 4px 10px; font-size: 11px; background: #37474F; color: white; border: none; border-radius: 3px; cursor: pointer;">📥 Import Save</button>
                 </div>
                 <div id="debugInfo" style="font-family: monospace; font-size: 10px; margin-top: 6px;">Ready</div>
-                <div style="font-size: 10px; color: #555; margin-top: 4px;">Last patch: <span style="color:#666;">2026-05-22 13:34</span></div>
+                <div style="font-size: 10px; color: #555; margin-top: 4px;">Last patch: <span style="color:#666;">2026-05-22 13:40</span></div>
             </div>
         </div>
 
@@ -2174,6 +2174,20 @@
         // Save game
         function saveGame() {
             try {
+                // Guard: don't overwrite a meaningful existing save with a fresh-looking state
+                const currentTotal = gameState.squat + gameState.bench + gameState.deadlift;
+                if (currentTotal < 50) {
+                    const existing = localStorage.getItem('ironWillSave3');
+                    if (existing) {
+                        try {
+                            const prev = JSON.parse(existing);
+                            if ((prev.squat||0) + (prev.bench||0) + (prev.deadlift||0) > 200) {
+                                console.warn('Skipping save — current state looks like fresh game but existing save has progress');
+                                return;
+                            }
+                        } catch(e) {}
+                    }
+                }
                 gameState.lastSave = Date.now();
                 localStorage.setItem('ironWillSave3', JSON.stringify(gameState));
                 // Update save indicator
@@ -3864,11 +3878,12 @@
 
         // ── Federation ranking ───────────────────────────────────────────────
 
+        // Thresholds are % of IPF WR total for your weight class — weight class neutral
         const FEDERATION_TIERS = [
-            { id: 'local',    name: 'Local',    minTotal: 150, winTarget: 260, knowledgeMult: 1.0 },
-            { id: 'regional', name: 'Regional', minTotal: 300, winTarget: 400, knowledgeMult: 2.2 },
-            { id: 'national', name: 'National', minTotal: 440, winTarget: 550, knowledgeMult: 4.5 },
-            { id: 'world',    name: 'World',    minTotal: 600, winTarget: 720, knowledgeMult: 9.0 },
+            { id: 'local',    name: 'Local',    minWRPct:  0, winWRPct: 35, knowledgeMult: 1.0 },
+            { id: 'regional', name: 'Regional', minWRPct: 30, winWRPct: 50, knowledgeMult: 2.2 },
+            { id: 'national', name: 'National', minWRPct: 45, winWRPct: 65, knowledgeMult: 4.5 },
+            { id: 'world',    name: 'World',    minWRPct: 60, winWRPct: 999, knowledgeMult: 9.0 },
         ];
 
         function getCurrentTier() {
@@ -3877,10 +3892,10 @@
         }
 
         function getHighestAvailableTier() {
-            const total = gameState.squat + gameState.bench + gameState.deadlift;
+            const pct = getWRPct(gameState.squat + gameState.bench + gameState.deadlift);
             let best = FEDERATION_TIERS[0];
             for (const t of FEDERATION_TIERS) {
-                if (total >= t.minTotal) best = t;
+                if (pct >= t.minWRPct) best = t;
             }
             return best;
         }
@@ -5142,14 +5157,16 @@
                 else           { gameState.motivation = Math.max(gameState.motivation - 10, 20);  rivalMsg = `<div style="color:#f88;font-size:12px;margin-top:6px;">${gameState.rival.name}: ${Math.floor(gameState.rival.total)}kg — ${Math.abs(diff)}kg ahead.</div>`; }
             }
 
-            // Federation rank-up
+            // Federation rank-up (WR%-based — weight class neutral)
+            const compWRPct = getWRPct(compTotal);
             let rankUpMsg = '';
             if (!dnf) {
                 if (!gameState.federation) gameState.federation = { rank: 'local' };
                 const tierIdx = FEDERATION_TIERS.findIndex(t => t.id === tier.id);
-                if (compTotal >= tier.winTarget && tierIdx < FEDERATION_TIERS.length - 1) {
+                if (compWRPct >= tier.winWRPct && tierIdx < FEDERATION_TIERS.length - 1) {
                     const nextTier = FEDERATION_TIERS[tierIdx + 1];
-                    if (gameState.squat + gameState.bench + gameState.deadlift >= nextTier.minTotal) {
+                    const trainPct = getWRPct(gameState.squat + gameState.bench + gameState.deadlift);
+                    if (trainPct >= nextTier.minWRPct) {
                         gameState.federation.rank = nextTier.id;
                         rankUpMsg = `🏅 Promoted to ${nextTier.name} Division!`;
                         addJournalEntry(`Promoted to ${nextTier.name} Division. The bar keeps getting heavier.`);
@@ -5190,13 +5207,16 @@
                     const curRank = (gameState.federation && gameState.federation.rank) || 'local';
                     const curTierIdx = FEDERATION_TIERS.findIndex(t => t.id === curRank);
                     const curTierObj = FEDERATION_TIERS[curTierIdx];
-                    if (curTierIdx >= FEDERATION_TIERS.length - 1) return '<div style="font-size:11px;color:#FFD700;text-align:center;margin-top:6px;">🌍 World Division — peak of the sport</div>';
+                    if (curTierIdx >= FEDERATION_TIERS.length - 1) return '<div style="font-size:11px;color:#FFD700;text-align:center;margin-top:6px;">\u{1F30D} World Division \u2014 peak of the sport</div>';
                     const nextTierObj = FEDERATION_TIERS[curTierIdx + 1];
-                    const needed = curTierObj.winTarget - compTotal;
-                    if (needed <= 0) return '';
-                    const trainTotal = gameState.squat + gameState.bench + gameState.deadlift;
-                    const trainLock = trainTotal < nextTierObj.minTotal ? ` (also need ${nextTierObj.minTotal}kg training total)` : '';
-                    return \`<div style="font-size:11px;color:#888;text-align:center;margin-top:6px;">Advance to ${nextTierObj.name}: need <span style="color:#FF9800;">${needed}kg more</span> total${trainLock}</div>\`;
+                    const curPct  = compWRPct.toFixed(1);
+                    const needPct = curTierObj.winWRPct;
+                    if (compWRPct >= needPct) return '';
+                    const gap = (needPct - compWRPct).toFixed(1);
+                    const trainPct = getWRPct(gameState.squat + gameState.bench + gameState.deadlift).toFixed(1);
+                    const trainLock = parseFloat(trainPct) < nextTierObj.minWRPct
+                        ? ' <span style="color:#666;">(training total also needs to reach ' + nextTierObj.minWRPct + '% WR — currently ' + trainPct + '%)</span>' : '';
+                    return '<div style="font-size:11px;color:#888;text-align:center;margin-top:6px;">Advance to ' + nextTierObj.name + ': hit <span style="color:#FF9800;">' + needPct + '% of your WR</span> in one meet (' + curPct + '% now, ' + gap + '% to go)' + trainLock + '</div>';
                 })()}
                 <div style="text-align:center;margin-top:10px;">
                     <button class="btn btn-success" onclick="document.getElementById('competitionModal').classList.remove('active');updateUI();">Done</button>
