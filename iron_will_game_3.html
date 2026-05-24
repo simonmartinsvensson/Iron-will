@@ -946,6 +946,12 @@
         .rank-regional { background: #1a2e1a; color: #4CAF50; }
         .rank-national { background: #162433; color: #2196F3; }
         .rank-world    { background: #2a1e0a; color: #FF9800; }
+        .rank-pantheon {
+            background: linear-gradient(135deg, #2a0a3e, #4a1a5e);
+            color: #f0c0ff;
+            border: 1px solid #8a4abe;
+            box-shadow: 0 0 8px rgba(180, 100, 220, 0.35);
+        }
 
         /* Journal */
         .journal-entry { padding: 10px 0; border-bottom: 1px solid #222; }
@@ -1743,6 +1749,9 @@
                 <button class="btn btn-warning" id="retirementBtn" style="display:none;">
                     Final Meet
                 </button>
+                <button class="btn" id="retireToCoachBtn" style="display:none;background:linear-gradient(135deg,#2a0a3e,#4a1a5e);color:#f0c0ff;border:1px solid #8a4abe;">
+                    🪦 Retire to Coach
+                </button>
             </div>
 
             <div style="margin-top: 15px; padding: 10px; background: #1a1a1a; border-radius: 6px; font-size: 11px; color: #888;">
@@ -1926,6 +1935,24 @@
                 <div id="challengesContent"></div>
             </div>
 
+            <!-- Mastery Tracks -->
+            <div class="log-section" id="masterySection" style="display:none;">
+                <div class="section-title">Mastery Tracks — earn ranks through specific feats. All three at Grandmaster unlocks the Iron Trinity.</div>
+                <div id="masteryContent"></div>
+            </div>
+
+            <!-- The Pantheon -->
+            <div class="log-section" id="pantheonSection" style="display:none;">
+                <div class="section-title">The Pantheon — face five named lifters in sequence. Each grants a permanent Mythic perk.</div>
+                <div id="pantheonContent"></div>
+            </div>
+
+            <!-- Hall of Fame -->
+            <div class="log-section" id="hallOfFameSection" style="display:none;">
+                <div class="section-title">Hall of Fame — every legacy you have left behind</div>
+                <div id="hallOfFameContent"></div>
+            </div>
+
             <!-- Achievements -->
             <div class="achievements-section">
                 <div class="section-title">Achievements</div>
@@ -2056,6 +2083,38 @@
         </div>
     </div>
 
+    <!-- Coaching (Retire to Coach) Modal -->
+    <div class="prestige-modal" id="coachingModal">
+        <div class="prestige-content" style="background:linear-gradient(135deg,#1a0a2e,#2a0a3e);border:1px solid #6a3a8e;">
+            <div class="prestige-title" style="color:#f0c0ff;">🪦 Retire to Coach</div>
+            <p style="color: #c0a0d0; margin-bottom: 20px;">
+                You will step off the platform for good. A new lifter takes your place — your own student, raised on what you have built. Their journey begins from the start, but they carry your legacy.
+            </p>
+
+            <div class="prestige-stats">
+                <div class="prestige-stat"><span>Final Total:</span>           <span style="color:#ddd;font-weight:bold;"><span id="coachTotal">—</span></span></div>
+                <div class="prestige-stat"><span>Final DOTS:</span>            <span style="color:#ddd;font-weight:bold;"><span id="coachDots">—</span></span></div>
+                <div class="prestige-stat"><span>Cycles This Life:</span>      <span style="color:#ddd;font-weight:bold;"><span id="coachCycles">—</span></span></div>
+                <div class="prestige-stat"><span>New Legacy Tier:</span>       <span style="color:#f0c0ff;font-weight:bold;">Tier <span id="coachNewTier">—</span></span></div>
+                <div class="prestige-stat"><span>Permanent Knowledge Bonus:</span><span style="color:#f0c0ff;font-weight:bold;">+<span id="coachNewBonus">—</span>%</span></div>
+            </div>
+
+            <p style="color: #888; font-size: 12px; margin: 15px 0; line-height:1.5;">
+                Persists: Mastery ranks, Pantheon defeats &amp; perks, Mythic records, achievements, legacy bonuses.<br>
+                Resets: Lifts, perks, prestige count, knowledge, equipment, gym, federation rank, partner.
+            </p>
+
+            <div class="prestige-buttons">
+                <button class="btn" id="confirmRetireToCoach" style="flex:2;background:linear-gradient(135deg,#2a0a3e,#4a1a5e);color:#f0c0ff;border:1px solid #8a4abe;">
+                    Pass the Torch
+                </button>
+                <button class="btn btn-primary" id="cancelRetireToCoach" style="flex:1;">
+                    Not Yet
+                </button>
+            </div>
+        </div>
+    </div>
+
     <script>
         // Story progression system
         const storyMilestones = [
@@ -2165,6 +2224,20 @@
             cycleCompWins: 0,
             rival: null,
             hadChronic: false,
+
+            // ── Endgame additions ────────────────────────────────────────────
+            // Per-lift mastery ranks (0-5 each, persist forever)
+            masteryRanks: { squat: 0, bench: 0, deadlift: 0 },
+            // Pantheon — sequenced named rivals beyond world tier
+            pantheonRivals: [],           // array of defeated rival IDs (persist forever)
+            currentPantheonRival: null,   // {id, total, timer} in-cycle pantheon opponent
+            pantheonPerks: [],            // mythic perks awarded by defeating Pantheon rivals
+            // Mythic records — kg posted beyond the IPF WR per lift (persist forever)
+            mythicRecords: { squat: 0, bench: 0, deadlift: 0 },
+            // Counters used by endgame achievements
+            perfectMeets: 0,              // 9/9 meets achieved
+            // Coaching legacy state (the meta-prestige loop)
+            // gameState.legacy.legacyTier / hallOfFame / coachingBonusPct
         };
 
         // Load saved game
@@ -2298,6 +2371,10 @@
                 tickRival(elapsed);
             }
 
+            // Pantheon rival progression (offline)
+            spawnPantheonRivalIfReady();
+            if (gameState.currentPantheonRival) tickPantheonRival(elapsed);
+
             // Auto-convert PRs if enabled (capped at 500 offline PRs)
             let prsGained = 0;
             if (gameState.autoConvert) {
@@ -2375,7 +2452,7 @@
             const peakMult       = (gameState.peaking > 0) ? 0.3 : 1;
             const gymMult        = 1 + GYM_TIERS[gameState.gymTier || 0].adaptBonus;
 
-            return baseRate * intensityMult * techniqueMult * motivationMult * fatigueReduction * knowledgeBonus * beltBonus * supercomp * weightMult * nutritionMult * partnerMult * peakMult * gymMult;
+            return baseRate * intensityMult * techniqueMult * motivationMult * fatigueReduction * knowledgeBonus * beltBonus * supercomp * weightMult * nutritionMult * partnerMult * peakMult * gymMult * getEndgameAdaptationMult();
         }
 
         // Calculate fatigue rate
@@ -2577,6 +2654,9 @@
                 renderLegacy();
                 renderChallenges();
                 renderRival();
+                renderMastery();
+                renderPantheonRivals();
+                renderHallOfFame();
             }
 
             // Peaking status display
@@ -2885,6 +2965,13 @@
                 tickRival(delta);
             }
 
+            // Pantheon — spawn and tick the active named rival
+            spawnPantheonRivalIfReady();
+            if (gameState.currentPantheonRival) tickPantheonRival(delta);
+
+            // Mastery — passive check (in case bodyweight or records shifted)
+            checkMasteryUnlocks();
+
             // Life events (trigger every 3–8 minutes, only after competition is unlocked)
             if ((gameState.unlockedFeatures || {}).competition) {
                 if (!gameState.nextLifeEvent || now > gameState.nextLifeEvent) {
@@ -2993,9 +3080,22 @@
             if ((gameState.chronicInjuries || {})[selectedLift]) gainMult *= 0.80;
             // Signature lift bonus
             if (gameState.signatureLift && selectedLift === gameState.signatureLift) gainMult *= 1.08;
+            // Endgame: mastery, Iron Trinity, Pantheon perks
+            gainMult *= getEndgameGainMult(selectedLift);
+
+            // Cynic's Edge — at high motivation, PRs may roll critical (×2 gain).
+            let critical = false;
+            if (hasPantheonPerk('cynics_edge') && (gameState.motivation || 0) >= 90 && Math.random() < 0.20) {
+                critical = true;
+                gainMult *= 2;
+            }
 
             const gain = (2.5 + Math.random() * 2.5) * gainMult;
             gameState[selectedLift] += gain;
+            // Endgame: update mythic record tracking and check for mastery rank ups.
+            updateMythicRecords();
+            checkMasteryUnlocks();
+            if (critical) showNotification(`CRITICAL — ${selectedLift} ${Math.floor(gameState[selectedLift])}kg (+${gain.toFixed(1)})`, 'pr');
 
             // Benefits
             gameState.motivation = Math.min(100, gameState.motivation + 20);
@@ -3133,7 +3233,7 @@
             const scholarMult = 1 + perkCount('scholar') * 0.25;
             const allDone = gameState.challenges && gameState.challenges.every(c => c.done);
             const challengeBonus = allDone ? 1.20 : 1.0;
-            const knowledgeGain = Math.floor(100 * Math.pow(total / getPrestigeThreshold(), 1.2) * scholarMult * challengeBonus);
+            const knowledgeGain = Math.floor(100 * Math.pow(total / getPrestigeThreshold(), 1.2) * scholarMult * challengeBonus * getEndgameKnowledgeMult());
             const newBonus = Math.floor(knowledgeGain * 0.1);
 
             document.getElementById('modalTotal').textContent = total;
@@ -3149,7 +3249,7 @@
             const scholarMult = 1 + perkCount('scholar') * 0.25;
             const allDone = gameState.challenges && gameState.challenges.every(c => c.done);
             const challengeBonus = allDone ? 1.20 : 1.0;
-            const knowledgeGain = Math.floor(100 * Math.pow(total / getPrestigeThreshold(), 1.2) * scholarMult * challengeBonus);
+            const knowledgeGain = Math.floor(100 * Math.pow(total / getPrestigeThreshold(), 1.2) * scholarMult * challengeBonus * getEndgameKnowledgeMult());
 
             gameState.knowledge += knowledgeGain;
             gameState.prestigeCount++;
@@ -3312,6 +3412,46 @@
                 title: 'You\'re Not Alone Up Here',
                 story: `World level. The scoreboard at meets has a name you keep seeing.\n\nThe judges know it. The officials know it. And now you know it.\n\nSomeone is training just as hard as you are. Maybe harder. Their total is growing. Yours is growing faster. Probably.\n\nYou've never wanted to beat someone so badly in your life.`,
                 unlock: 'A rival lifter has appeared — track them in the Competition section.',
+            },
+            {
+                id: 'mastery',
+                check: (gs) => gs.prestigeCount >= 5 && gs.federation && gs.federation.rank === 'world',
+                chapter: 'The Craft',
+                title: 'A Lifetime in Three Lifts',
+                story: `Your coach pulls up a chair and watches you finish a long session.\n\n"You know what separates good lifters from masters?" he asks. "Good lifters chase numbers. Masters chase the lift itself."\n\nHe takes out a worn leather notebook. Inside: three columns — squat, bench, deadlift — each filled with handwritten ranks and feats stretching back decades.\n\n"Every lift has its own apprenticeship. Apprentice, journeyman, adept, master, grandmaster. The path is the same as it ever was. The feats are the only proof."\n\nHe slides the notebook across. "Add your name when you earn it."`,
+                unlock: 'Mastery Tracks unlocked — each lift now has 5 mastery ranks. Earn each rank through specific feats. Reach grandmaster in all three to unlock the Iron Trinity.',
+            },
+            {
+                id: 'mythicRecords',
+                check: (gs, total) => getWRPct(total) >= 78,
+                chapter: 'Beyond the Record',
+                title: 'The Numbers Have No Ceiling',
+                story: `You've matched a world record. Maybe even passed one.\n\nThere's a strange weight to it — a stillness in the gym after the lift, an absence of comparison. The lifters above you in the sport no longer exist as benchmarks. You are the benchmark now.\n\nThe iron only knows two things: what it weighs, and whether you lifted it. It doesn't care that no one has done this before.`,
+                unlock: 'Mythic Records — any lift exceeding the IPF World Record now contributes to a permanent Mythic bonus on prestige.',
+            },
+            {
+                id: 'pantheon',
+                check: (gs, total) => getWRPct(total) >= 80,
+                chapter: 'The Pantheon',
+                title: 'Where the Legends Train',
+                story: `Eighty percent. The world record is no longer a distant horizon. It's an upper bound.\n\nYour coach hands you an unfamiliar invitation card. The paper is heavier than a meet flyer should be. There's no federation logo — just a single word embossed in gold:\n\nPANTHEON.\n\n"It's not a federation," he says. "It's a roster. The strongest five names in the sport's living memory. They train together. They lift together. And when one of them retires, they choose who steps onto the platform next."\n\nHe taps the card. "They want to see you lift."`,
+                unlock: 'Pantheon Division unlocked — a tier above World. Knowledge multiplier ×22. Face the five Pantheon lifters in sequence.',
+            },
+            {
+                id: 'pantheonComplete',
+                check: (gs) => Array.isArray(gs.pantheonRivals) && gs.pantheonRivals.length >= 5,
+                chapter: 'Among Legends',
+                title: 'Your Name on the Plaque',
+                story: `The five names are crossed off. One by one, you stood across the platform from each of them. One by one, you out-lifted them.\n\nThere is a small ceremony — barely a ceremony at all. A handshake. A small bronze plaque etched with a single line: your name and a number, the total you posted when you beat the last of them.\n\nYou are now of the Pantheon. There is no division above this. The sport itself looks up at you.`,
+                unlock: 'Pantheon Complete — all five Pantheon perks awarded. The Coaching path is now available.',
+            },
+            {
+                id: 'coaching',
+                check: (gs) => gs.prestigeCount >= 8 && Array.isArray(gs.pantheonRivals) && gs.pantheonRivals.length >= 3,
+                chapter: 'Beyond Strength',
+                title: 'What Will You Pass On?',
+                story: `A young lifter — your own age, when you started — asks you a question after their warmup set. It's the same question you once asked your coach.\n\nYou answer it. Easily. Without thinking.\n\nYou realize the answer has been waiting in you for years.\n\nThat night, your coach asks if you'd ever consider stepping off the platform — not in defeat, not in injury, but in service. To coach. To pass it on. To start again, in a way, with everything you've earned still part of you.`,
+                unlock: 'Coaching Mode unlocked — Retire to Coach to begin a Legacy. Each legacy grants permanent stacking bonuses across all future cycles.',
             },
             {
                 id: 'deload',
@@ -3515,6 +3655,19 @@
                     sigDisplay.textContent = SIGNATURE_TITLES[gameState.signatureLift] || gameState.signatureLift;
                 }
             }
+
+            // Endgame sections
+            const masterySec = document.getElementById('masterySection');
+            if (masterySec) masterySec.style.display = f.mastery ? '' : 'none';
+
+            const pantheonSec = document.getElementById('pantheonSection');
+            if (pantheonSec) pantheonSec.style.display = f.pantheon ? '' : 'none';
+
+            const hofSec = document.getElementById('hallOfFameSection');
+            if (hofSec) hofSec.style.display = ((gameState.legacy && gameState.legacy.hallOfFame && gameState.legacy.hallOfFame.length > 0) || f.coaching) ? '' : 'none';
+
+            const coachBtn = document.getElementById('retireToCoachBtn');
+            if (coachBtn) coachBtn.style.display = canRetireToCoach() ? '' : 'none';
         }
 
         // ── Perks ────────────────────────────────────────────────────────────
@@ -3902,10 +4055,11 @@
 
         // Thresholds are % of IPF WR total for your weight class — weight class neutral
         const FEDERATION_TIERS = [
-            { id: 'local',    name: 'Local',    minWRPct:  0, winWRPct: 35, knowledgeMult: 1.0 },
-            { id: 'regional', name: 'Regional', minWRPct: 30, winWRPct: 50, knowledgeMult: 2.2 },
-            { id: 'national', name: 'National', minWRPct: 45, winWRPct: 65, knowledgeMult: 4.5 },
-            { id: 'world',    name: 'World',    minWRPct: 60, winWRPct: 999, knowledgeMult: 9.0 },
+            { id: 'local',    name: 'Local',    minWRPct:  0, winWRPct: 35,  knowledgeMult: 1.0  },
+            { id: 'regional', name: 'Regional', minWRPct: 30, winWRPct: 50,  knowledgeMult: 2.2  },
+            { id: 'national', name: 'National', minWRPct: 45, winWRPct: 65,  knowledgeMult: 4.5  },
+            { id: 'world',    name: 'World',    minWRPct: 60, winWRPct: 88,  knowledgeMult: 9.0  },
+            { id: 'pantheon', name: 'Pantheon', minWRPct: 80, winWRPct: 999, knowledgeMult: 22.0 },
         ];
 
         function getCurrentTier() {
@@ -4005,7 +4159,495 @@
             { id: 'veteran',     name: 'Veteran',          desc: 'Complete 3 prestige cycles',    icon: '🎖️', check: gs => gs.prestigeCount >= 4 },
             { id: 'prestige5',   name: 'Serial Athlete',   desc: 'Complete 5 prestige cycles',    icon: '🎭', check: gs => gs.prestigeCount >= 5 },
             { id: 'prestige10',  name: 'Lifer',            desc: 'Complete 10 prestige cycles',   icon: '♾️', check: gs => gs.prestigeCount >= 10 },
+
+            // ── Endgame: Pantheon tier & Mythic Records ──────────────────────
+            { id: 'rank_pantheon',  name: 'Of the Pantheon',     desc: 'Reach Pantheon division',                       icon: '👑', check: gs => gs.federation && gs.federation.rank === 'pantheon' },
+            { id: 'mythic_squat',   name: 'Mythic Squat',        desc: 'Squat above the IPF World Record',              icon: '🏔️', check: gs => (gs.mythicRecords && gs.mythicRecords.squat || 0) > 0 },
+            { id: 'mythic_bench',   name: 'Mythic Bench',        desc: 'Bench above the IPF World Record',              icon: '🏔️', check: gs => (gs.mythicRecords && gs.mythicRecords.bench || 0) > 0 },
+            { id: 'mythic_dl',      name: 'Mythic Deadlift',     desc: 'Deadlift above the IPF World Record',           icon: '🏔️', check: gs => (gs.mythicRecords && gs.mythicRecords.deadlift || 0) > 0 },
+            { id: 'mythic_trio',    name: 'Beyond the Record',   desc: 'Exceed the WR in all three lifts',              icon: '🌌', check: gs => gs.mythicRecords && gs.mythicRecords.squat > 0 && gs.mythicRecords.bench > 0 && gs.mythicRecords.deadlift > 0 },
+            { id: 'total1000',      name: 'Four Digits',         desc: '1,000 kg total',                                icon: '🔥', check: gs => gs.squat+gs.bench+gs.deadlift >= 1000 },
+            { id: 'total1250',      name: 'Pantheon Total',      desc: '1,250 kg total',                                icon: '🌋', check: gs => gs.squat+gs.bench+gs.deadlift >= 1250 },
+            { id: 'dots700',        name: 'DOTS 700',            desc: 'DOTS 700 — beyond elite',                       icon: '☄️', check: gs => getDOTS(gs.squat+gs.bench+gs.deadlift, gs.bodyweight||83) >= 700 },
+
+            // ── Endgame: Named Rivals (The Pantheon) ─────────────────────────
+            { id: 'pantheon_1',     name: 'Beat the Veteran',     desc: 'Defeat Volkov, The Old Bear',                    icon: '🥃', check: gs => Array.isArray(gs.pantheonRivals) && gs.pantheonRivals.includes('volkov') },
+            { id: 'pantheon_2',     name: 'Beat the Prodigy',     desc: 'Defeat Tanaka, The Prodigy',                     icon: '🌸', check: gs => Array.isArray(gs.pantheonRivals) && gs.pantheonRivals.includes('tanaka') },
+            { id: 'pantheon_3',     name: 'Beat the Gear King',   desc: 'Defeat Brandt, The Engineer',                    icon: '⚙️', check: gs => Array.isArray(gs.pantheonRivals) && gs.pantheonRivals.includes('brandt') },
+            { id: 'pantheon_4',     name: 'Beat the Cynic',       desc: 'Defeat Lindgren, The Iron Cynic',                icon: '🥶', check: gs => Array.isArray(gs.pantheonRivals) && gs.pantheonRivals.includes('lindgren') },
+            { id: 'pantheon_5',     name: 'Beat the Legend',      desc: 'Defeat Okonkwo, The Living Legend',              icon: '🦁', check: gs => Array.isArray(gs.pantheonRivals) && gs.pantheonRivals.includes('okonkwo') },
+            { id: 'pantheon_all',   name: 'The Pantheon',         desc: 'Defeat all five Pantheon lifters',               icon: '🏛️', check: gs => Array.isArray(gs.pantheonRivals) && gs.pantheonRivals.length >= 5 },
+
+            // ── Endgame: Mastery Tracks ──────────────────────────────────────
+            { id: 'mast_squat_3',   name: 'Squat Adept',         desc: 'Reach Squat Mastery rank 3',                    icon: '🔵', check: gs => (gs.masteryRanks && gs.masteryRanks.squat || 0) >= 3 },
+            { id: 'mast_squat_5',   name: 'Squat Grandmaster',   desc: 'Reach Squat Mastery rank 5',                    icon: '🔷', check: gs => (gs.masteryRanks && gs.masteryRanks.squat || 0) >= 5 },
+            { id: 'mast_bench_3',   name: 'Bench Adept',         desc: 'Reach Bench Mastery rank 3',                    icon: '🟢', check: gs => (gs.masteryRanks && gs.masteryRanks.bench || 0) >= 3 },
+            { id: 'mast_bench_5',   name: 'Bench Grandmaster',   desc: 'Reach Bench Mastery rank 5',                    icon: '💚', check: gs => (gs.masteryRanks && gs.masteryRanks.bench || 0) >= 5 },
+            { id: 'mast_dl_3',      name: 'Deadlift Adept',      desc: 'Reach Deadlift Mastery rank 3',                 icon: '🟠', check: gs => (gs.masteryRanks && gs.masteryRanks.deadlift || 0) >= 3 },
+            { id: 'mast_dl_5',      name: 'Deadlift Grandmaster',desc: 'Reach Deadlift Mastery rank 5',                 icon: '🔶', check: gs => (gs.masteryRanks && gs.masteryRanks.deadlift || 0) >= 5 },
+            { id: 'iron_trinity',   name: 'The Iron Trinity',    desc: 'Grandmaster in all three lifts (+25% all gains)', icon: '🔱', check: gs => gs.masteryRanks && gs.masteryRanks.squat >= 5 && gs.masteryRanks.bench >= 5 && gs.masteryRanks.deadlift >= 5 },
+            { id: 'mastery_first',  name: 'First Mastery',       desc: 'Reach rank 1 in any lift',                       icon: '⚜️', check: gs => gs.masteryRanks && (gs.masteryRanks.squat + gs.masteryRanks.bench + gs.masteryRanks.deadlift) >= 1 },
+            { id: 'mastery_arch',   name: 'Architect of Iron',   desc: 'Combined mastery rank of 9+',                   icon: '🛡️', check: gs => gs.masteryRanks && (gs.masteryRanks.squat + gs.masteryRanks.bench + gs.masteryRanks.deadlift) >= 9 },
+
+            // ── Endgame: Legacy / Coaching ───────────────────────────────────
+            { id: 'legacy_1',       name: 'The Coach',           desc: 'Retire to coach for the first time',             icon: '📖', check: gs => gs.legacy && (gs.legacy.legacyTier || 0) >= 1 },
+            { id: 'legacy_3',       name: 'Three Generations',   desc: 'Three completed legacies',                       icon: '📚', check: gs => gs.legacy && (gs.legacy.legacyTier || 0) >= 3 },
+            { id: 'legacy_5',       name: 'A Dynasty',           desc: 'Five completed legacies',                        icon: '🏛️', check: gs => gs.legacy && (gs.legacy.legacyTier || 0) >= 5 },
+            { id: 'legacy_10',      name: 'Living Institution',  desc: 'Ten completed legacies',                         icon: '🕯️', check: gs => gs.legacy && (gs.legacy.legacyTier || 0) >= 10 },
+
+            // ── Endgame: Stretch goals & hidden ──────────────────────────────
+            { id: 'pr2500',         name: 'Two Thousand Five',   desc: '2,500 lifetime PRs',                             icon: '📊', check: gs => ((gs.legacy && gs.legacy.allTimePRs||0) + (gs.prCount||0)) >= 2500 },
+            { id: 'pr5000',         name: 'Five Thousand PRs',   desc: '5,000 lifetime PRs',                             icon: '📈', check: gs => ((gs.legacy && gs.legacy.allTimePRs||0) + (gs.prCount||0)) >= 5000 },
+            { id: 'prestige25',     name: 'Quarter Century',     desc: 'Complete 25 prestige cycles',                    icon: '🪙', check: gs => gs.prestigeCount >= 25 },
+            { id: 'comp25',         name: 'Platform Career',     desc: 'Enter 25 competitions',                          icon: '🎟️', check: gs => (gs.competitionsEntered||0) >= 25 },
+            { id: 'comp50',         name: 'Old Hand',            desc: 'Enter 50 competitions',                          icon: '🎫', check: gs => (gs.competitionsEntered||0) >= 50 },
+            { id: 'perfect_5',      name: 'Pressure Lifter',     desc: '5 perfect meets',                                icon: '✨', check: gs => (gs.perfectMeets||0) >= 5 },
+            { id: 'perfect_25',     name: 'Reliable Under Iron', desc: '25 perfect meets',                               icon: '🌟', check: gs => (gs.perfectMeets||0) >= 25 },
+            { id: 'wr_triple',      name: 'Triple Crown Try',    desc: 'Attempt a world record in all 3 lifts in one cycle', icon: '👑', check: gs => gs.wrAttempts && gs.wrAttempts.squat && gs.wrAttempts.bench && gs.wrAttempts.deadlift },
+            { id: 'cycle_wins10',   name: 'Untouchable',         desc: 'Win 10 competitions in a single cycle',          icon: '🏆', check: gs => (gs.cycleCompWins||0) >= 10 },
+            { id: 'flyweight_king', name: 'Featherweight Legend',desc: '(hidden) DOTS 600 at 66kg or lighter',           icon: '🪶', hidden: true, check: gs => (gs.bodyweight||83) <= 66 && getDOTS(gs.squat+gs.bench+gs.deadlift, gs.bodyweight||83) >= 600 },
+            { id: 'heavy_king',     name: 'Heavyweight King',    desc: '(hidden) 850kg total at 120kg+',                 icon: '🦏', hidden: true, check: gs => (gs.bodyweight||83) > 120 && gs.squat+gs.bench+gs.deadlift >= 850 },
+            { id: 'no_chronic_5',   name: 'Built to Last',       desc: '(hidden) Reach 500kg total without a chronic injury this cycle', icon: '🪨', hidden: true, check: gs => !gs.hadChronic && gs.squat+gs.bench+gs.deadlift >= 500 },
+            { id: 'mythic_total',   name: 'Above the Record',    desc: 'Sum 60kg of Mythic total across lifts',          icon: '⛰️', check: gs => gs.mythicRecords && (gs.mythicRecords.squat + gs.mythicRecords.bench + gs.mythicRecords.deadlift) >= 60 },
+            { id: 'all_perks',      name: 'Polymath',            desc: 'Earn at least one of every Pantheon perk',       icon: '🧠', check: gs => gs.pantheonPerks && gs.pantheonPerks.length >= 5 },
+            { id: 'completionist',  name: 'Iron Encyclopedia',   desc: '(hidden) Unlock every other achievement',        icon: '📕', hidden: true, check: gs => {
+                if (!gs.achievements) return false;
+                const others = ACHIEVEMENT_DEFS.filter(a => a.id !== 'completionist');
+                return others.every(a => gs.achievements[a.id]);
+            }},
         ];
+
+        // ════════════════════════════════════════════════════════════════════
+        //  ENDGAME EXPANSION
+        //  Pantheon tier · Named Rivals · Mastery Tracks · Coaching Legacy
+        // ════════════════════════════════════════════════════════════════════
+
+        // ── Mastery Tracks ───────────────────────────────────────────────────
+        // Each lift has 5 ranks. A rank is permanently unlocked once its feat
+        // is satisfied. Ranks grant +3% PR gains per rank (max +15% per lift),
+        // and Iron Trinity (all 3 at rank 5) adds another +25% to all lifts.
+
+        const MASTERY_TRACKS = {
+            squat: [
+                { rank: 1, name: 'Apprentice',   feat: 'All-time squat ≥ 150 kg',                 check: gs => (gs.records && gs.records.squat || 0) >= 150 },
+                { rank: 2, name: 'Journeyman',   feat: 'All-time squat ≥ 220 kg',                 check: gs => (gs.records && gs.records.squat || 0) >= 220 },
+                { rank: 3, name: 'Adept',        feat: 'Squat 1.5× bodyweight',                    check: gs => (gs.records && gs.records.squat || 0) >= 1.5 * (gs.bodyweight || 83) },
+                { rank: 4, name: 'Master',       feat: 'Squat 2.0× bodyweight',                    check: gs => (gs.records && gs.records.squat || 0) >= 2.0 * (gs.bodyweight || 83) },
+                { rank: 5, name: 'Grandmaster',  feat: 'Squat ≥ 90% of weight-class WR',           check: gs => {
+                    const wr = WORLD_RECORDS[getWeightClass(gs.bodyweight||83).max] || WORLD_RECORDS[83];
+                    return (gs.records && gs.records.squat || 0) >= wr.squat * 0.90;
+                }},
+            ],
+            bench: [
+                { rank: 1, name: 'Apprentice',   feat: 'All-time bench ≥ 100 kg',                  check: gs => (gs.records && gs.records.bench || 0) >= 100 },
+                { rank: 2, name: 'Journeyman',   feat: 'All-time bench ≥ 140 kg',                  check: gs => (gs.records && gs.records.bench || 0) >= 140 },
+                { rank: 3, name: 'Adept',        feat: 'Bench 1.25× bodyweight',                    check: gs => (gs.records && gs.records.bench || 0) >= 1.25 * (gs.bodyweight || 83) },
+                { rank: 4, name: 'Master',       feat: 'Bench 1.6× bodyweight',                     check: gs => (gs.records && gs.records.bench || 0) >= 1.6  * (gs.bodyweight || 83) },
+                { rank: 5, name: 'Grandmaster',  feat: 'Bench ≥ 90% of weight-class WR',            check: gs => {
+                    const wr = WORLD_RECORDS[getWeightClass(gs.bodyweight||83).max] || WORLD_RECORDS[83];
+                    return (gs.records && gs.records.bench || 0) >= wr.bench * 0.90;
+                }},
+            ],
+            deadlift: [
+                { rank: 1, name: 'Apprentice',   feat: 'All-time deadlift ≥ 180 kg',               check: gs => (gs.records && gs.records.deadlift || 0) >= 180 },
+                { rank: 2, name: 'Journeyman',   feat: 'All-time deadlift ≥ 250 kg',               check: gs => (gs.records && gs.records.deadlift || 0) >= 250 },
+                { rank: 3, name: 'Adept',        feat: 'Deadlift 2.0× bodyweight',                  check: gs => (gs.records && gs.records.deadlift || 0) >= 2.0 * (gs.bodyweight || 83) },
+                { rank: 4, name: 'Master',       feat: 'Deadlift 2.5× bodyweight',                  check: gs => (gs.records && gs.records.deadlift || 0) >= 2.5 * (gs.bodyweight || 83) },
+                { rank: 5, name: 'Grandmaster',  feat: 'Deadlift ≥ 90% of weight-class WR',         check: gs => {
+                    const wr = WORLD_RECORDS[getWeightClass(gs.bodyweight||83).max] || WORLD_RECORDS[83];
+                    return (gs.records && gs.records.deadlift || 0) >= wr.deadlift * 0.90;
+                }},
+            ],
+        };
+
+        function getMasteryRank(lift) {
+            return (gameState.masteryRanks && gameState.masteryRanks[lift]) || 0;
+        }
+
+        function getMasteryGainBonus(lift) {
+            // +3% per rank, plus +25% if Iron Trinity (all three at rank 5).
+            const rank = getMasteryRank(lift);
+            const trinity = getMasteryRank('squat') >= 5 && getMasteryRank('bench') >= 5 && getMasteryRank('deadlift') >= 5;
+            return rank * 0.03 + (trinity ? 0.25 : 0);
+        }
+
+        function checkMasteryUnlocks() {
+            if (!gameState.masteryRanks) gameState.masteryRanks = { squat: 0, bench: 0, deadlift: 0 };
+            let unlocked = false;
+            ['squat', 'bench', 'deadlift'].forEach(lift => {
+                const track = MASTERY_TRACKS[lift];
+                let cur = gameState.masteryRanks[lift];
+                while (cur < track.length && track[cur].check(gameState)) {
+                    cur++;
+                    const r = track[cur - 1];
+                    gameState.masteryRanks[lift] = cur;
+                    unlocked = true;
+                    addJournalEntry(`Mastery rank earned — ${lift} ${r.name}. ${r.feat}.`);
+                    showNotification(`Mastery: ${lift.charAt(0).toUpperCase()+lift.slice(1)} ${r.name} (rank ${r.rank})`, 'pr');
+                }
+            });
+            if (unlocked) {
+                renderMastery();
+                checkAchievements();
+            }
+        }
+
+        function renderMastery() {
+            const el = document.getElementById('masteryContent');
+            if (!el) return;
+            const liftLabels = { squat: 'Squat', bench: 'Bench', deadlift: 'Deadlift' };
+            const liftColors = { squat: '#2196F3', bench: '#4CAF50', deadlift: '#FF5722' };
+            const trinity = getMasteryRank('squat') >= 5 && getMasteryRank('bench') >= 5 && getMasteryRank('deadlift') >= 5;
+            let html = '';
+            if (trinity) {
+                html += `<div style="background:linear-gradient(135deg,#2a0a3e,#4a1a5e);border:1px solid #b070d0;border-radius:8px;padding:10px;margin-bottom:12px;text-align:center;color:#f0c0ff;font-weight:bold;">🔱 IRON TRINITY ACTIVE — +25% gains to all lifts</div>`;
+            }
+            ['squat', 'bench', 'deadlift'].forEach(lift => {
+                const cur = getMasteryRank(lift);
+                const next = (MASTERY_TRACKS[lift] || [])[cur];
+                const bonus = (cur * 3);
+                html += `<div style="background:#1a1a1a;border:1px solid #333;border-left:3px solid ${liftColors[lift]};border-radius:6px;padding:10px;margin-bottom:8px;">
+                    <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:6px;">
+                        <div style="font-weight:bold;color:${liftColors[lift]};">${liftLabels[lift]}</div>
+                        <div style="font-size:11px;color:#aaa;">Rank ${cur}/5 · +${bonus}% gains</div>
+                    </div>
+                    <div style="display:flex;gap:4px;margin-bottom:6px;">`;
+                MASTERY_TRACKS[lift].forEach((r, i) => {
+                    const filled = i < cur;
+                    html += `<div title="${r.name}: ${r.feat}" style="flex:1;height:14px;border-radius:3px;border:1px solid #444;background:${filled ? liftColors[lift] : '#222'};${filled ? '' : 'opacity:0.5;'}"></div>`;
+                });
+                html += `</div>`;
+                if (next) {
+                    html += `<div style="font-size:11px;color:#888;">Next — <strong style="color:#ccc;">${next.name}</strong>: ${next.feat}</div>`;
+                } else {
+                    html += `<div style="font-size:11px;color:#b070d0;font-weight:bold;">✓ Grandmaster — all ranks earned</div>`;
+                }
+                html += `</div>`;
+            });
+            el.innerHTML = html;
+        }
+
+        // ── Pantheon Rivals ──────────────────────────────────────────────────
+        // Five named lifters faced sequentially after reaching Pantheon tier.
+        // Defeating one is permanent and grants a unique mythic perk.
+
+        const PANTHEON_RIVALS = [
+            { id: 'volkov',   name: 'Yuri "The Old Bear" Volkov',  title: 'The Veteran',
+              flavor: 'Forty-two years old. Three world titles. He has been training since before you knew the lift existed.',
+              wrPct: 0.78, perk: 'old_iron' },
+            { id: 'tanaka',   name: 'Haruki "Spring" Tanaka',      title: 'The Prodigy',
+              flavor: 'Nineteen. He had a senior national total at fifteen. His ceiling is genuinely unknown.',
+              wrPct: 0.82, perk: 'prodigys_gift' },
+            { id: 'brandt',   name: 'Klaus "The Engineer" Brandt', title: 'The Equipped Champion',
+              flavor: 'A career equipped lifter who crossed back to raw at thirty-four. Every piece of gear, every cue, optimised.',
+              wrPct: 0.86, perk: 'geared_wisdom' },
+            { id: 'lindgren', name: 'Erik "Iron Cynic" Lindgren',  title: 'The Cynic',
+              flavor: 'Quiet. Methodical. He believes only in numbers. He has been waiting for you specifically.',
+              wrPct: 0.90, perk: 'cynics_edge' },
+            { id: 'okonkwo',  name: 'Ifeanyi "Living Legend" Okonkwo', title: 'The Legend',
+              flavor: 'The current Pantheon anchor. Holder of the platform total record. There is no one above him.',
+              wrPct: 0.94, perk: 'legends_blood' },
+        ];
+
+        const PANTHEON_PERKS = {
+            old_iron:       { name: 'Old Iron',        desc: 'Competition Knowledge rewards ×1.5',     icon: '🥃' },
+            prodigys_gift:  { name: "Prodigy's Gift",  desc: 'Adaptation rate +20% permanently',       icon: '🌸' },
+            geared_wisdom:  { name: 'Geared Wisdom',   desc: 'Equipment effects +30%',                  icon: '⚙️' },
+            cynics_edge:    { name: "Cynic's Edge",    desc: 'Critical PRs (×2 gain) at high motivation', icon: '🥶' },
+            legends_blood:  { name: "Legend's Blood",  desc: '+5% to all gains, compounding per cycle', icon: '🦁' },
+        };
+
+        function hasPantheonPerk(id) {
+            return Array.isArray(gameState.pantheonPerks) && gameState.pantheonPerks.includes(id);
+        }
+
+        function nextPantheonRivalDef() {
+            const beaten = gameState.pantheonRivals || [];
+            return PANTHEON_RIVALS.find(r => !beaten.includes(r.id)) || null;
+        }
+
+        function tickPantheonRival(delta) {
+            if (!gameState.currentPantheonRival) return;
+            const r = gameState.currentPantheonRival;
+            r.timer = (r.timer || 60) - delta;
+            if (r.timer <= 0) {
+                // Pantheon rivals grow steadily — they're a moving target.
+                r.total += (1 + Math.random() * 1.5);
+                r.timer = 60;
+            }
+        }
+
+        function spawnPantheonRivalIfReady() {
+            // Spawn next rival when player reaches Pantheon tier and slot is empty.
+            if (!gameState.federation || gameState.federation.rank !== 'pantheon') return;
+            if (gameState.currentPantheonRival) return;
+            const def = nextPantheonRivalDef();
+            if (!def) return; // all defeated
+            const wr = WORLD_RECORDS[getWeightClass(gameState.bodyweight || 83).max] || WORLD_RECORDS[83];
+            const target = Math.floor(wr.total * def.wrPct);
+            gameState.currentPantheonRival = { id: def.id, total: target, timer: 60 };
+            addJournalEntry(`Pantheon challenger: ${def.name} (${def.title}). Posted total: ${target} kg.`);
+            showNotification(`The Pantheon answers — ${def.name} steps onto the platform.`, 'pr');
+        }
+
+        function challengePantheonRival() {
+            const r = gameState.currentPantheonRival;
+            if (!r) { showNotification('No active Pantheon challenger', 'warning'); return; }
+            const def = PANTHEON_RIVALS.find(p => p.id === r.id);
+            if (!def) return;
+            const playerTotal = Math.floor(gameState.squat + gameState.bench + gameState.deadlift);
+            if (playerTotal <= r.total) {
+                showNotification(`${def.name} is still ahead — ${Math.ceil(r.total - playerTotal)} kg to close.`, 'warning');
+                return;
+            }
+            // Defeated. Record the win, award the mythic perk, advance.
+            if (!gameState.pantheonRivals) gameState.pantheonRivals = [];
+            if (!gameState.pantheonRivals.includes(def.id)) gameState.pantheonRivals.push(def.id);
+            if (!gameState.pantheonPerks) gameState.pantheonPerks = [];
+            if (!gameState.pantheonPerks.includes(def.perk)) gameState.pantheonPerks.push(def.perk);
+            gameState.currentPantheonRival = null;
+            const perk = PANTHEON_PERKS[def.perk];
+            const kBonus = 250 + 250 * gameState.pantheonRivals.length;
+            gameState.knowledge += kBonus;
+            addJournalEntry(`Defeated ${def.name}. Mythic perk earned: ${perk.name}. +${kBonus} Knowledge.`);
+            showNotification(`Pantheon victory — ${perk.icon} ${perk.name}. +${kBonus} Knowledge.`, 'pr');
+            checkAchievements();
+            updateUI();
+            renderPantheonRivals();
+            saveGame();
+        }
+
+        function renderPantheonRivals() {
+            const el = document.getElementById('pantheonContent');
+            if (!el) return;
+            const beaten = gameState.pantheonRivals || [];
+            const cur = gameState.currentPantheonRival;
+            let html = '';
+
+            // Defeated list
+            if (beaten.length > 0) {
+                html += `<div style="font-size:11px;color:#888;text-transform:uppercase;letter-spacing:1px;margin-bottom:6px;">Defeated</div>`;
+                beaten.forEach(id => {
+                    const def = PANTHEON_RIVALS.find(p => p.id === id);
+                    if (!def) return;
+                    const perk = PANTHEON_PERKS[def.perk];
+                    html += `<div style="background:#0f1a0f;border:1px solid #2a4a2a;border-radius:6px;padding:8px;margin-bottom:6px;display:flex;justify-content:space-between;align-items:center;">
+                        <div>
+                            <div style="color:#8fd88f;font-weight:bold;font-size:13px;">✓ ${def.name}</div>
+                            <div style="color:#888;font-size:11px;">${def.title}</div>
+                        </div>
+                        <div title="${perk.desc}" style="font-size:11px;color:#b070d0;padding:3px 8px;background:#1a0a2e;border:1px solid #4a2a6e;border-radius:4px;">${perk.icon} ${perk.name}</div>
+                    </div>`;
+                });
+            }
+
+            // Active or all done
+            if (cur) {
+                const def = PANTHEON_RIVALS.find(p => p.id === cur.id);
+                const player = Math.floor(gameState.squat + gameState.bench + gameState.deadlift);
+                const ahead = player > cur.total;
+                const diff = Math.abs(player - Math.floor(cur.total));
+                html += `<div style="background:#1a1209;border:1px solid #6a3a0a;border-radius:8px;padding:12px;margin-top:8px;">
+                    <div style="font-size:11px;color:#FF9800;text-transform:uppercase;letter-spacing:1px;margin-bottom:6px;">Active Challenger</div>
+                    <div style="color:#ddd;font-weight:bold;font-size:14px;">${def.name}</div>
+                    <div style="color:#aaa;font-size:11px;margin-bottom:4px;">${def.title}</div>
+                    <div style="color:#888;font-size:11px;font-style:italic;margin-bottom:8px;">${def.flavor}</div>
+                    <div style="font-size:12px;color:#aaa;">Their total: <strong>${Math.floor(cur.total)} kg</strong> &nbsp;·&nbsp; Yours: <strong>${player} kg</strong></div>
+                    <div style="font-size:12px;margin-top:4px;color:${ahead ? '#8f8' : '#f88'};font-weight:bold;">${ahead ? '▲' : '▼'} ${diff} kg ${ahead ? 'ahead' : 'behind'}</div>
+                    <div style="margin-top:8px;">
+                        <button class="btn btn-primary" onclick="challengePantheonRival()" ${ahead ? '' : 'disabled'} style="width:100%;${ahead ? '' : 'opacity:0.5;'}">${ahead ? 'Challenge on the platform' : 'Close the gap first'}</button>
+                    </div>
+                    <div style="font-size:10px;color:#666;margin-top:6px;">Reward: Mythic perk &nbsp;·&nbsp; ${PANTHEON_PERKS[def.perk].icon} ${PANTHEON_PERKS[def.perk].name} — ${PANTHEON_PERKS[def.perk].desc}</div>
+                </div>`;
+            } else if (beaten.length >= PANTHEON_RIVALS.length) {
+                html += `<div style="background:linear-gradient(135deg,#2a0a3e,#4a1a5e);border:1px solid #b070d0;border-radius:8px;padding:12px;margin-top:8px;text-align:center;color:#f0c0ff;font-weight:bold;">🏛️ The Pantheon is complete. Your name is on the plaque.</div>`;
+            } else {
+                html += `<div style="color:#666;font-size:12px;padding:8px;">Reach Pantheon division to face the next challenger.</div>`;
+            }
+            el.innerHTML = html;
+        }
+
+        // ── Mythic Records ───────────────────────────────────────────────────
+        // Best kg posted ABOVE the IPF WR per lift. Persists forever.
+        // Adds a knowledge multiplier on prestige based on total mythic kg.
+
+        function updateMythicRecords() {
+            if (!gameState.mythicRecords) gameState.mythicRecords = { squat: 0, bench: 0, deadlift: 0 };
+            const wr = WORLD_RECORDS[getWeightClass(gameState.bodyweight || 83).max] || WORLD_RECORDS[83];
+            ['squat', 'bench', 'deadlift'].forEach(lift => {
+                const over = Math.max(0, gameState[lift] - wr[lift]);
+                if (over > gameState.mythicRecords[lift]) gameState.mythicRecords[lift] = over;
+            });
+        }
+
+        function getMythicKg() {
+            const m = gameState.mythicRecords || {};
+            return (m.squat || 0) + (m.bench || 0) + (m.deadlift || 0);
+        }
+
+        function getMythicKnowledgeMult() {
+            // +0.5% per kg above WR (caps at +50% for 100kg of mythic across lifts).
+            return 1 + Math.min(0.5, getMythicKg() * 0.005);
+        }
+
+        // ── Coaching Legacy (meta-prestige) ──────────────────────────────────
+        // After becoming eligible, the player may retire to coach. This:
+        //   - records the current run as a Hall of Fame entry,
+        //   - increments legacy.legacyTier,
+        //   - resets the run to a fresh game with a permanent stacking bonus.
+        // Defeated Pantheon rivals, mythic records, and mastery ranks PERSIST.
+
+        function canRetireToCoach() {
+            // Available once the player has unlocked coaching AND meets thresholds.
+            const f = gameState.unlockedFeatures || {};
+            if (!f.coaching) return false;
+            return gameState.prestigeCount >= 8 || (Array.isArray(gameState.pantheonRivals) && gameState.pantheonRivals.length >= 3);
+        }
+
+        function showRetireToCoachModal() {
+            if (!canRetireToCoach()) return;
+            const total = Math.floor(gameState.squat + gameState.bench + gameState.deadlift);
+            const dots  = parseFloat(getDOTS(total, gameState.bodyweight || 83).toFixed(1));
+            const newBonus = ((gameState.legacy.coachingBonusPct || 0) + 8);
+            document.getElementById('coachTotal').textContent     = total + ' kg';
+            document.getElementById('coachDots').textContent      = dots.toFixed(1);
+            document.getElementById('coachCycles').textContent    = gameState.prestigeCount;
+            document.getElementById('coachNewTier').textContent   = (gameState.legacy.legacyTier || 0) + 1;
+            document.getElementById('coachNewBonus').textContent  = newBonus;
+            document.getElementById('coachingModal').classList.add('active');
+        }
+
+        function closeCoachingModal() {
+            const m = document.getElementById('coachingModal');
+            if (m) m.classList.remove('active');
+        }
+
+        function retireToCoach() {
+            // Record the run that's ending.
+            const total = Math.floor(gameState.squat + gameState.bench + gameState.deadlift);
+            const dots  = parseFloat(getDOTS(total, gameState.bodyweight || 83).toFixed(1));
+            if (!gameState.legacy) gameState.legacy = { bestTotal: 0, bestDots: 0, allTimePRs: 0, allTimeKnowledge: 0, cycles: 0 };
+            if (!Array.isArray(gameState.legacy.hallOfFame)) gameState.legacy.hallOfFame = [];
+            gameState.legacy.hallOfFame.unshift({
+                tier: (gameState.legacy.legacyTier || 0) + 1,
+                total, dots,
+                cycles: gameState.prestigeCount,
+                pantheonBeaten: (gameState.pantheonRivals || []).slice(),
+                date: Date.now(),
+            });
+            // Cap history at 20 entries.
+            if (gameState.legacy.hallOfFame.length > 20) gameState.legacy.hallOfFame.length = 20;
+
+            // Permanent legacy bonus (+8% per tier).
+            gameState.legacy.legacyTier      = (gameState.legacy.legacyTier || 0) + 1;
+            gameState.legacy.coachingBonusPct = (gameState.legacy.coachingBonusPct || 0) + 8;
+
+            // Reset for the new "generation" — softer than prestige.
+            gameState.squat = 60; gameState.bench = 40; gameState.deadlift = 80;
+            gameState.adaptation = 0; gameState.fatigue = 0; gameState.motivation = 100;
+            gameState.technique = 50;
+            gameState.lastPR = Date.now();
+            gameState.injuries = { squat: 0, bench: 0, deadlift: 0 };
+            gameState.chronicInjuries = { squat: false, bench: false, deadlift: false };
+            gameState.accessories = { squat: 0, bench: 0, deadlift: 0 };
+            gameState.wrAttempts = { squat: false, bench: false, deadlift: false };
+            gameState.challenges = null;
+            gameState.cycleCompWins = 0;
+            gameState.rival = null;
+            gameState.currentPantheonRival = null;
+            gameState.prCount = 0;
+            gameState.hadChronic = false;
+            gameState.peaking = 0;
+            gameState.peakingUsed = false;
+            gameState.season = null;
+            gameState.federation = { rank: 'local' };
+            gameState.signatureLift = null;
+            gameState.compBests = { squat: 0, bench: 0, deadlift: 0, total: 0 };
+            // Fully reset perks and prestige count — this is a new life.
+            gameState.perks = [];
+            gameState.prestigeCount = 1;
+            // Knowledge: keep a small seed scaled by legacy tier.
+            gameState.knowledge = 50 + 25 * (gameState.legacy.legacyTier - 1);
+            // Equipment and gym tier reset too — full restart.
+            gameState.equipment = { belt: false, kneeSleves: false, wristWraps: false, deadliftSuit: false, chalk: false, preWorkout: false };
+            gameState.gymTier = 0;
+            gameState.trainingPartner = 0;
+            // PERSIST: masteryRanks, pantheonRivals, pantheonPerks, mythicRecords, records,
+            // perfectMeets, competitionsEntered, achievements, legacy.
+
+            closeCoachingModal();
+            addJournalEntry(`Retired to coach. The first new lifter walks in tomorrow. Legacy tier: ${gameState.legacy.legacyTier}.`);
+            showNotification(`A new life begins. Legacy bonus: +${gameState.legacy.coachingBonusPct}% Knowledge from now on.`, 'pr');
+            updateUI();
+            updateUIVisibility();
+            saveGame();
+        }
+
+        function renderHallOfFame() {
+            const el = document.getElementById('hallOfFameContent');
+            if (!el) return;
+            const hof = (gameState.legacy && gameState.legacy.hallOfFame) || [];
+            if (hof.length === 0) {
+                el.innerHTML = `<div style="color:#666;font-size:12px;padding:8px;">No completed legacies yet. Reach Pantheon and prestige to unlock Coaching.</div>`;
+                return;
+            }
+            const bonus = (gameState.legacy && gameState.legacy.coachingBonusPct) || 0;
+            let html = `<div style="font-size:12px;color:#b070d0;margin-bottom:8px;">Coaching bonus active: <strong>+${bonus}% Knowledge</strong> from all sources</div>`;
+            hof.forEach(entry => {
+                const date = new Date(entry.date).toLocaleDateString([], { year: 'numeric', month: 'short', day: 'numeric' });
+                html += `<div style="background:#1a0a2e;border:1px solid #4a2a6e;border-radius:6px;padding:10px;margin-bottom:8px;">
+                    <div style="display:flex;justify-content:space-between;align-items:baseline;">
+                        <span style="color:#f0c0ff;font-weight:bold;">Legacy ${entry.tier}</span>
+                        <span style="color:#888;font-size:11px;">${date}</span>
+                    </div>
+                    <div style="font-size:12px;color:#aaa;margin-top:4px;">
+                        Best Total: <strong style="color:#ddd;">${entry.total} kg</strong> &nbsp;·&nbsp;
+                        DOTS: <strong style="color:#ddd;">${entry.dots.toFixed(1)}</strong> &nbsp;·&nbsp;
+                        Cycles: <strong style="color:#ddd;">${entry.cycles}</strong>
+                    </div>
+                    ${entry.pantheonBeaten && entry.pantheonBeaten.length > 0 ? `<div style="font-size:11px;color:#888;margin-top:3px;">Pantheon defeated: ${entry.pantheonBeaten.length}/5</div>` : ''}
+                </div>`;
+            });
+            el.innerHTML = html;
+        }
+
+        // ── Endgame multipliers (wired into existing systems) ────────────────
+
+        // Total extra PR-gain multiplier from endgame systems for a given lift.
+        function getEndgameGainMult(lift) {
+            let m = 1;
+            // Mastery + Iron Trinity
+            m += getMasteryGainBonus(lift);
+            // Legend's Blood — compounding +5% per cycle since earned (capped softly).
+            if (hasPantheonPerk('legends_blood')) {
+                m *= 1 + Math.min(0.5, 0.05 * Math.max(0, (gameState.prestigeCount || 1) - 1));
+            }
+            // Geared Wisdom — boosts equipment effect lines (only when relevant gear owned).
+            if (hasPantheonPerk('geared_wisdom') && gameState.equipment) {
+                const map = { squat: 'kneeSleves', bench: 'wristWraps', deadlift: 'deadliftSuit' };
+                if (gameState.equipment[map[lift]]) m *= 1.15;
+            }
+            return m;
+        }
+
+        // Knowledge multiplier from endgame systems (applied wherever knowledge is earned via prestige).
+        function getEndgameKnowledgeMult() {
+            let m = 1;
+            m *= getMythicKnowledgeMult();
+            const legacyBonus = (gameState.legacy && gameState.legacy.coachingBonusPct) || 0;
+            m *= 1 + legacyBonus / 100;
+            return m;
+        }
+
+        function getEndgameCompKnowledgeMult() {
+            // Old Iron — +50% knowledge from competition wins.
+            return hasPantheonPerk('old_iron') ? 1.5 : 1;
+        }
+
+        function getEndgameAdaptationMult() {
+            // Prodigy's Gift — +20% adaptation rate.
+            return hasPantheonPerk('prodigys_gift') ? 1.20 : 1;
+        }
 
         const FOCUS_WEIGHTS = {
             balanced:  [1.2, 0.8, 1.3],
@@ -4451,7 +5093,7 @@
             const scholarMult = 1 + perkCount('scholar') * 0.25;
             const allDone = gameState.challenges && gameState.challenges.every(c => c.done);
             const challengeBonus = allDone ? 1.20 : 1.0;
-            const kGain = Math.floor(100 * Math.pow(total / getPrestigeThreshold(), 1.2) * scholarMult * 1.5 * challengeBonus);
+            const kGain = Math.floor(100 * Math.pow(total / getPrestigeThreshold(), 1.2) * scholarMult * 1.5 * challengeBonus * getEndgameKnowledgeMult());
             document.getElementById('retirementKnowledge').textContent = kGain;
             document.getElementById('retirementModal').classList.add('active');
         }
@@ -4461,7 +5103,7 @@
             const scholarMult = 1 + perkCount('scholar') * 0.25;
             const allDone = gameState.challenges && gameState.challenges.every(c => c.done);
             const challengeBonus = allDone ? 1.20 : 1.0;
-            const knowledgeGain = Math.floor(100 * Math.pow(total / getPrestigeThreshold(), 1.2) * scholarMult * 1.5 * challengeBonus);
+            const knowledgeGain = Math.floor(100 * Math.pow(total / getPrestigeThreshold(), 1.2) * scholarMult * 1.5 * challengeBonus * getEndgameKnowledgeMult());
 
             gameState.knowledge += knowledgeGain;
             gameState.prestigeCount++;
@@ -5161,7 +5803,7 @@
             if (compTotal > gameState.compBests.total) gameState.compBests.total = compTotal;
 
             const tier = getCurrentTier();
-            const knowledgeGain = dnf ? 0 : Math.max(10, Math.floor(compTotal / 12 * tier.knowledgeMult));
+            const knowledgeGain = dnf ? 0 : Math.max(10, Math.floor(compTotal / 12 * tier.knowledgeMult * getEndgameCompKnowledgeMult() * (1 + ((gameState.legacy && gameState.legacy.coachingBonusPct) || 0) / 100)));
             if (knowledgeGain) gameState.knowledge += knowledgeGain;
             gameState.competitionsEntered = (gameState.competitionsEntered || 0) + 1;
             // Track perfect meets (9/9)
@@ -5269,6 +5911,9 @@
         document.getElementById('cancelRetirement').addEventListener('click', () => {
             document.getElementById('retirementModal').classList.remove('active');
         });
+        document.getElementById('retireToCoachBtn').addEventListener('click', showRetireToCoachModal);
+        document.getElementById('confirmRetireToCoach').addEventListener('click', retireToCoach);
+        document.getElementById('cancelRetireToCoach').addEventListener('click', closeCoachingModal);
 
         document.getElementById('autoConvertToggle').addEventListener('change', (e) => {
             gameState.autoConvert = e.target.checked;
@@ -5358,6 +6003,18 @@
         if (gameState.hadChronic === undefined)    gameState.hadChronic = false;
         if (!gameState.legacy.retirementMedals)    gameState.legacy.retirementMedals = 0;
         if (gameState.legacy.challengeWins === undefined) gameState.legacy.challengeWins = 0;
+
+        // Endgame back-compat
+        if (!gameState.masteryRanks)         gameState.masteryRanks = { squat: 0, bench: 0, deadlift: 0 };
+        if (!gameState.pantheonRivals)       gameState.pantheonRivals = [];
+        if (gameState.currentPantheonRival === undefined) gameState.currentPantheonRival = null;
+        if (!gameState.pantheonPerks)        gameState.pantheonPerks = [];
+        if (!gameState.mythicRecords)        gameState.mythicRecords = { squat: 0, bench: 0, deadlift: 0 };
+        if (gameState.perfectMeets === undefined) gameState.perfectMeets = 0;
+        if (gameState.legacy.legacyTier === undefined)        gameState.legacy.legacyTier = 0;
+        if (gameState.legacy.coachingBonusPct === undefined)  gameState.legacy.coachingBonusPct = 0;
+        if (!Array.isArray(gameState.legacy.hallOfFame))      gameState.legacy.hallOfFame = [];
+
         // Initialise records from current save
         updateRecords();
 
