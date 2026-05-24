@@ -1765,7 +1765,7 @@
                     <button onclick="document.getElementById('importModal').classList.add('active')" style="padding: 4px 10px; font-size: 11px; background: #37474F; color: white; border: none; border-radius: 3px; cursor: pointer;">📥 Import Save</button>
                 </div>
                 <div id="debugInfo" style="font-family: monospace; font-size: 10px; margin-top: 6px;">Ready</div>
-                <div style="font-size: 10px; color: #555; margin-top: 4px;">Last patch: <span style="color:#666;">2026-05-24 21:25</span></div>
+                <div style="font-size: 10px; color: #555; margin-top: 4px;">Last patch: <span style="color:#666;">2026-05-24 21:53</span></div>
             </div>
         </div>
 
@@ -1931,6 +1931,7 @@
             <div class="log-section" id="allTimeRecordsSection" style="border-top:none;">
                 <div class="section-title">All-Time Records</div>
                 <div class="records-grid" id="recordsGrid"></div>
+                <div id="careerStatsLine" style="font-size:11px;color:#888;margin-top:8px;text-align:center;font-style:italic;"></div>
             </div>
 
             <!-- Training Journal -->
@@ -1999,6 +2000,12 @@
             <div class="log-section" id="mindTreeSection">
                 <div class="section-title">Mind Tree — spend achievement points on permanent talents</div>
                 <div id="mindTreeContent"></div>
+            </div>
+
+            <!-- Iron Will Tournament — capstone -->
+            <div class="log-section" id="tournamentSection" style="display:none;">
+                <div class="section-title">The Iron Will Tournament — complete every objective to earn your Method</div>
+                <div id="tournamentContent"></div>
             </div>
 
             <!-- Achievements -->
@@ -2747,6 +2754,7 @@
                 renderFederationBodies();
                 renderGarage();
                 renderApprentice();
+                renderTournament();
             }
 
             // Peaking status display
@@ -3071,6 +3079,17 @@
             tickStrongman(delta);
             tickApprentice(delta);
             checkDailyChallenge();
+
+            // Ambient gym chatter — fire occasionally so the gym feels alive.
+            if (!gameState.nextGymChatter || now > gameState.nextGymChatter) {
+                if (gameState.nextGymChatter > 0) emitGymChatter();
+                gameState.nextGymChatter = now + (240 + Math.random() * 360) * 1000; // 4–10 min
+            }
+            // Coach drop-ins — state-triggered, one per cycle each.
+            if (!gameState.nextCoachCheck || now > gameState.nextCoachCheck) {
+                maybeCoachDropin();
+                gameState.nextCoachCheck = now + 90 * 1000; // throttle to once per 90s
+            }
             // Generate a sponsor offer periodically (every ~5 min real time)
             if ((gameState.unlockedFeatures || {}).competition) {
                 if (now - (gameState.lastSponsorCheck || 0) > 5 * 60 * 1000) {
@@ -3405,6 +3424,7 @@
             gameState.federation = { rank: 'local' };
             gameState.signatureLift = null; // re-earned each cycle
             gameState.compBests = { squat: 0, bench: 0, deadlift: 0, total: 0 }; // fresh per-cycle comp records
+            gameState.coachDropinsFired = {}; // re-fireable each cycle
 
             document.getElementById('prestigeModal').classList.remove('active');
 
@@ -3564,6 +3584,66 @@
                 title: 'What Will You Pass On?',
                 story: `A young lifter — your own age, when you started — asks you a question after their warmup set. It's the same question you once asked your coach.\n\nYou answer it. Easily. Without thinking.\n\nYou realize the answer has been waiting in you for years.\n\nThat night, your coach asks if you'd ever consider stepping off the platform — not in defeat, not in injury, but in service. To coach. To pass it on. To start again, in a way, with everything you've earned still part of you.`,
                 unlock: 'Coaching Mode unlocked — Retire to Coach to begin a Legacy. Each legacy grants permanent stacking bonuses across all future cycles.',
+            },
+            // ── Second-wave system unlocks (paced) ────────────────────────────
+            {
+                id: 'variants_unlock',
+                check: (gs) => gs.prestigeCount >= 2,
+                chapter: 'The Detail',
+                title: "What's Your Stance?",
+                story: `Between sets, the coach watches you set up. Same approach to the bar every time, more or less.\n\n"You should pick a stance," he says. "Not just for today. For the cycle. High bar or low bar. Sumo or conventional. The bar treats you better when it knows what it's doing."\n\nHe doesn't tell you which. That's your choice.`,
+                unlock: 'Lift Style unlocked — pick a stance for each lift in the Gear tab.',
+            },
+            {
+                id: 'dailyChallenge_unlock',
+                check: (gs) => (gs.unlockedFeatures || {}).competition && gs.prestigeCount >= 2,
+                chapter: 'The Habit',
+                title: 'Show Up Every Day',
+                story: `Coach hands you a small notebook. The pages are blank but ruled.\n\n"One objective a day," he says. "Not big. Just specific. Hit it or don't. Tomorrow you write a new one. That's how careers get built — not in the meet, in the Tuesdays."`,
+                unlock: 'Daily Challenge unlocked — one fresh objective per UTC day in the Progress tab.',
+            },
+            {
+                id: 'strongman_unlock',
+                check: (gs) => (gs.squat + gs.bench + gs.deadlift) >= 400,
+                chapter: 'The Other Side',
+                title: 'A Friend From the Other Sport',
+                story: `An old training partner messages you. He moved over to strongman two years ago and you'd lost touch.\n\n"There's an event next weekend if you want to throw your name in. Log press, stones, farmer's carry. Different rules. Same iron."\n\nYou catch yourself wondering how your bench would handle a log.`,
+                unlock: 'Strongman side events — random pop-ups appear in the Gear tab when conditions are right.',
+            },
+            {
+                id: 'sponsor_unlock',
+                check: (gs) => gs.federation && ['regional','national','world','pantheon'].includes(gs.federation.rank),
+                chapter: 'The First Brand',
+                title: 'A Rep Slides You a Card',
+                story: `At a regional meet, a brand rep watches you grind out a heavy single. After warmups, she slides her business card across the bench.\n\n"We're putting together a small roster," she says. "Free product. Some royalties. A few rules about what you can and can't use. Think about it."`,
+                unlock: 'Sponsorship offers — periodic deals in the Gear tab. Knowledge per minute in exchange for a restriction.',
+            },
+            {
+                id: 'fedBody_unlock',
+                check: (gs) => gs.federation && ['national','world','pantheon'].includes(gs.federation.rank),
+                chapter: 'Federation Politics',
+                title: 'Choose Your House',
+                story: `A national-level meet director takes you aside between flights.\n\n"You've earned enough credibility to compete under any sanctioning body. IPF. WRPF. USAPL. Different rules. Different drug testing. Different totals." He shrugs. "Different politics, too. But that's not really your problem."`,
+                unlock: 'Sanctioning Body unlocked — pick your federation in the Gear tab.',
+            },
+            {
+                id: 'garage_unlock',
+                check: (gs) => gs.prestigeCount >= 3,
+                chapter: 'Your Own Space',
+                title: 'A Garage and a Concrete Slab',
+                story: `You drive past a friend's place and slow down without realizing why. His garage door is open. A platform, a rack, a single bar.\n\nHe waves you in. "Build your own," he says. "Piece by piece. By the time you're done, you'll know every inch of it. It'll feel like an extension of your body."\n\nYou look at the slab. You start picturing what would go where.`,
+                unlock: 'Garage Gym unlocked — build your own gym room by room in the Gear tab. Persists across every legacy.',
+            },
+            {
+                id: 'mindTree_unlock',
+                check: (gs) => {
+                    if (!gs.achievements) return false;
+                    return Object.values(gs.achievements).filter(Boolean).length >= 10;
+                },
+                chapter: 'Refining',
+                title: 'The Sharper Tool',
+                story: `You sit alone in the gym after closing time. Just the bar and your own breath.\n\nYou think about everything you've earned. Not just the totals — the habits, the instincts, the way you carry yourself between sets. The way you read a barbell now.\n\nCoach sees you sitting with it the next morning. "That's the part nobody trains for," he says. "You earn it by doing the work for years. And once you have it, you can sharpen it on purpose."`,
+                unlock: 'Mind Tree unlocked — spend achievement points on permanent talents in the Progress tab.',
             },
             {
                 id: 'deload',
@@ -3781,20 +3861,26 @@
             const coachBtn = document.getElementById('retireToCoachBtn');
             if (coachBtn) coachBtn.style.display = canRetireToCoach() ? '' : 'none';
 
-            // Second-wave sections
-            const total = gameState.squat + gameState.bench + gameState.deadlift;
+            // Second-wave sections — gated by story unlock flags
             const variantsSec = document.getElementById('variantsSection');
-            if (variantsSec) variantsSec.style.display = gameState.prestigeCount >= 2 ? '' : 'none';
+            if (variantsSec) variantsSec.style.display = f.variants_unlock ? '' : 'none';
             const strongmanSec = document.getElementById('strongmanSection');
-            if (strongmanSec) strongmanSec.style.display = total >= 300 ? '' : 'none';
+            if (strongmanSec) strongmanSec.style.display = f.strongman_unlock ? '' : 'none';
             const fedBodySec = document.getElementById('fedBodySection');
-            if (fedBodySec) fedBodySec.style.display = f.competition ? '' : 'none';
+            if (fedBodySec) fedBodySec.style.display = f.fedBody_unlock ? '' : 'none';
             const sponsorSec = document.getElementById('sponsorSection');
-            if (sponsorSec) sponsorSec.style.display = f.competition ? '' : 'none';
+            if (sponsorSec) sponsorSec.style.display = f.sponsor_unlock ? '' : 'none';
             const garageSec = document.getElementById('garageSection');
-            if (garageSec) garageSec.style.display = gameState.prestigeCount >= 2 ? '' : 'none';
+            if (garageSec) garageSec.style.display = f.garage_unlock ? '' : 'none';
             const apprenticeSec = document.getElementById('apprenticeSection');
             if (apprenticeSec) apprenticeSec.style.display = f.coaching ? '' : 'none';
+            const dailySec = document.getElementById('dailySection');
+            if (dailySec) dailySec.style.display = f.dailyChallenge_unlock ? '' : 'none';
+            const mindSec = document.getElementById('mindTreeSection');
+            if (mindSec) mindSec.style.display = f.mindTree_unlock ? '' : 'none';
+            // Tournament — show once player has reached the World+ tier
+            const tournSec = document.getElementById('tournamentSection');
+            if (tournSec) tournSec.style.display = (gameState.federation && ['world','pantheon'].includes(gameState.federation.rank)) ? '' : 'none';
         }
 
         // ── Perks ────────────────────────────────────────────────────────────
@@ -4012,6 +4098,26 @@
                     <div class="info-value" style="color:#FFD700;">${i.value}</div>
                 </div>`
             ).join('');
+
+            // Career stats line — consolidated lifetime facts.
+            const careerEl = document.getElementById('careerStatsLine');
+            if (careerEl) {
+                const prs   = ((gameState.legacy && gameState.legacy.allTimePRs) || 0) + (gameState.prCount || 0);
+                const cyc   = gameState.prestigeCount || 1;
+                const meets = gameState.competitionsEntered || 0;
+                const strong= gameState.strongmanWins || 0;
+                const apps  = gameState.apprenticeRetired || 0;
+                const legacy= (gameState.legacy && gameState.legacy.legacyTier) || 0;
+                const parts = [
+                    `${prs} lifetime PRs`,
+                    `${cyc} cycle${cyc===1?'':'s'}`,
+                    `${meets} meet${meets===1?'':'s'}`,
+                ];
+                if (strong > 0) parts.push(`${strong} strongman win${strong===1?'':'s'}`);
+                if (apps   > 0) parts.push(`${apps} apprentice${apps===1?'':'s'} coached`);
+                if (legacy > 0) parts.push(`${legacy} legac${legacy===1?'y':'ies'}`);
+                careerEl.textContent = parts.join(' · ');
+            }
         }
 
         // ── Training journal ─────────────────────────────────────────────────
@@ -4022,7 +4128,69 @@
             "Good session. Everything clicked.",
             "Some days the weights feel heavy. Today wasn't one of them.",
             "Progress is slow until it isn't. Today was a good reminder.",
+            "Three white lights. Felt slow but moved fast.",
+            "Bar speed was right. Cue was clean. Numbers followed.",
+            "Was nervous before the warm-up. Forgot why after the first set.",
+            "Lined up with the bar. The doubt was gone before the unrack.",
+            "Just a Tuesday. Just a PR. They add up.",
         ];
+
+        // Ambient gym chatter — fires occasionally to make the gym feel alive.
+        // Never notifies; just lands quietly in the journal.
+        const GYM_CHATTER = [
+            "Someone in the corner is grunting through a heavy front squat. You don't look up.",
+            "The kid by the dumbbell rack drops one. Everyone pretends not to hear.",
+            "A new regular nods at you on the way to the platform. You nod back.",
+            "Music is too loud today. Somehow it's exactly what you needed.",
+            "Two old powerlifters argue about belt tightness near the squat rack. Both are right.",
+            "The chalk bowl is empty again. You make a mental note.",
+            "Someone leaves their plates loaded. The gym sighs as one.",
+            "A teenager films their bench. You remember being that nervous in front of a camera.",
+            "Coach is in the corner taking notes. You can't tell if they're about you.",
+            "Sun comes through the windows at the right angle. The platform glows for ten minutes.",
+            "Old commercial gym mix. \"Eye of the Tiger\". You catch yourself moving a little faster.",
+            "Janitor stops to watch a heavy single. Doesn't say anything. Walks on.",
+        ];
+
+        function emitGymChatter() {
+            if (!GYM_CHATTER.length) return;
+            const msg = GYM_CHATTER[Math.floor(Math.random() * GYM_CHATTER.length)];
+            addJournalEntry(msg);
+        }
+
+        // Coach drop-ins — state-triggered. Each fires at most once per cycle.
+        const COACH_DROPINS = [
+            { id: 'high_wr',        when: gs => getWRPct(gs.squat+gs.bench+gs.deadlift) >= 50,
+              text: `Coach pulls a chair over. "You're at half the world record total. People plateau here. The work stops looking like growth, starts looking like maintenance. Trust it. The growth is happening underneath."` },
+            { id: 'high_fatigue',   when: gs => gs.fatigue >= 850,
+              text: `Coach watches you rack the bar and says nothing for a long moment. Then: "If you don't deload, the deload will pick you. Loudly. Painfully. You won't like its timing."` },
+            { id: 'high_motivation',when: gs => gs.motivation >= 95 && (gs.prCount || 0) >= 5,
+              text: `Coach catches the look on your face between sets. "Save some of that for the platform. Training is hard. Meets are harder. You want the tank full when it counts."` },
+            { id: 'first_chronic',  when: gs => gs.chronicInjuries && Object.values(gs.chronicInjuries).some(Boolean),
+              text: `Coach sees you favouring a side. "Treat that. Not 'work around it.' Treat it. Lifters who ignore their bodies get to retire early. Lifters who listen, get to lift for thirty years."` },
+            { id: 'wr_close',       when: gs => {
+                const wr = WORLD_RECORDS[getWeightClass(gs.bodyweight||83).max] || WORLD_RECORDS[83];
+                return ['squat','bench','deadlift'].some(l => gs[l] / wr[l] >= 0.9);
+            }, text: `Coach checks his phone, then yours. Both showing the same world record. "Ninety percent. The air gets thin up here. Most people stop noticing the air. They notice the floor." He laughs once and walks off.` },
+            { id: 'long_session',   when: gs => (gs.prCount || 0) >= 30,
+              text: `Coach drops a water bottle on your bench. "Thirty PRs in one cycle. Either you're building something or you're about to break it. I can't tell yet. Let's see what tomorrow looks like."` },
+            { id: 'first_meet',     when: gs => (gs.competitionsEntered || 0) === 1,
+              text: `Coach finds you the morning after your first meet. "Different sport, isn't it. The bar weighs the same. Everything else weighs more. You'll get used to it."` },
+        ];
+
+        function maybeCoachDropin() {
+            if (!gameState.coachDropinsFired) gameState.coachDropinsFired = {};
+            for (const d of COACH_DROPINS) {
+                if (gameState.coachDropinsFired[d.id]) continue;
+                try {
+                    if (d.when(gameState)) {
+                        gameState.coachDropinsFired[d.id] = true;
+                        addJournalEntry(d.text);
+                        return; // one per check, to avoid floods
+                    }
+                } catch (e) {}
+            }
+        }
 
         function addJournalEntry(text) {
             if (!gameState.journal) gameState.journal = [];
@@ -4808,6 +4976,8 @@
             m *= getVariantGainMult(lift);
             m *= getGarageGainMult();
             m *= getFederationBody().gain;
+            // The Iron Will Method (capstone)
+            if (gameState.personalMethod) m *= 1.10;
             return m;
         }
 
@@ -4842,6 +5012,8 @@
             // Mind Tree (Studious) + Garage Trophy Wall + (Coach's Discipline applied above)
             m *= getMindKnowledgeMult();
             m *= getGarageTrophyMult();
+            // The Iron Will Method (capstone)
+            if (gameState.personalMethod) m *= 1.20;
             return m;
         }
 
@@ -5038,6 +5210,8 @@
             const reward = 50 + 15 * (gameState.prestigeCount || 1);
             gameState.knowledge += reward;
             d.claimed = true;
+            // Tournament counter
+            if (gameState.tournament) gameState.tournament.dailyCompleted = (gameState.tournament.dailyCompleted || 0) + 1;
             addJournalEntry(`Daily challenge complete: "${d.label}". +${reward} Knowledge.`);
             showNotification(`Daily +${reward} Knowledge claimed`, 'pr');
             renderDaily();
@@ -5498,6 +5672,79 @@
                 saveGame();
             }
         }
+        // ── Iron Will Tournament (capstone) ────────────────────────────────
+        // A single endgame meta-goal that touches every system. Completing the
+        // full checklist fires a final story chapter and grants the
+        // "Iron Will Method" — a permanent passive multiplier.
+
+        const TOURNAMENT_GOALS = [
+            { id: 'pantheon_tier',    label: 'Reach Pantheon division',                                        check: gs => gs.federation && gs.federation.rank === 'pantheon' },
+            { id: 'pantheon_all',     label: 'Defeat all five Pantheon lifters',                                check: gs => Array.isArray(gs.pantheonRivals) && gs.pantheonRivals.length >= 5 },
+            { id: 'iron_trinity',     label: 'Reach Grandmaster in all three lifts',                            check: gs => gs.masteryRanks && gs.masteryRanks.squat >= 5 && gs.masteryRanks.bench >= 5 && gs.masteryRanks.deadlift >= 5 },
+            { id: 'tri_fed',          label: 'Win a meet under each sanctioning body (IPF / WRPF / USAPL)',     check: gs => gs.tournament && gs.tournament.fedWins && gs.tournament.fedWins.ipf && gs.tournament.fedWins.wrpf && gs.tournament.fedWins.usapl },
+            { id: 'garage_full',      label: 'Build every Garage Gym room',                                     check: gs => GARAGE_ROOMS.every(r => gs.garage && gs.garage.rooms && gs.garage.rooms[r.id]) },
+            { id: 'daily_30',         label: 'Claim 30 daily challenges',                                       check: gs => gs.tournament && (gs.tournament.dailyCompleted || 0) >= 30 },
+            { id: 'apprentice_3',     label: 'Coach three apprentices to graduation',                           check: gs => (gs.apprenticeRetired || 0) >= 3 },
+            { id: 'achieve_50',       label: 'Unlock 50+ achievements',                                         check: gs => gs.achievements && Object.values(gs.achievements).filter(Boolean).length >= 50 },
+            { id: 'legacy_1',         label: 'Complete one Legacy retirement',                                  check: gs => gs.legacy && (gs.legacy.legacyTier || 0) >= 1 },
+            { id: 'mythic_trio',      label: 'Exceed the IPF World Record in all three lifts',                  check: gs => gs.mythicRecords && gs.mythicRecords.squat > 0 && gs.mythicRecords.bench > 0 && gs.mythicRecords.deadlift > 0 },
+        ];
+
+        function checkTournament() {
+            if (!gameState.tournament) return;
+            if (gameState.tournament.claimed) return;
+            const allDone = TOURNAMENT_GOALS.every(g => g.check(gameState));
+            if (allDone && !gameState.tournament.completed) {
+                gameState.tournament.completed = true;
+                // Fire a one-time capstone story
+                storyQueue.push({
+                    chapter: 'The Iron Will Method',
+                    title: 'A Lifetime Reduced to One Sentence',
+                    story: `It's late. The gym is empty. You stand on the platform between sets that you don't really need to do.\n\nEverything you've earned is yours: every cycle, every federation, every named opponent, every apprentice's first 400 kg total. The story of this gym, the story of you in it.\n\nYou sit on the bench. You write one sentence in the front of your training log — the through-line you found in the work, the thing only you could have said this way.\n\nA stranger could read it and miss it. You see it now and it explains everything.\n\nIt has your name on it. They will call it your method. You don't bother explaining; they will figure it out, or they won't.`,
+                    unlock: 'The Iron Will Method earned — +10% to all PR gains and +20% Knowledge from all sources, permanently.',
+                    chapterClass: 'method',
+                });
+                if (!storyShowing) showNextStory();
+            }
+        }
+
+        function claimTournament() {
+            if (!gameState.tournament || !gameState.tournament.completed || gameState.tournament.claimed) return;
+            gameState.tournament.claimed = true;
+            gameState.personalMethod = true;
+            addJournalEntry("The Iron Will Method named and claimed. It's yours now.");
+            showNotification('The Iron Will Method — +10% gains, +20% Knowledge forever', 'pr');
+            renderTournament();
+            updateUI(); saveGame();
+        }
+
+        function renderTournament() {
+            const el = document.getElementById('tournamentContent');
+            if (!el) return;
+            checkTournament();
+            const t = gameState.tournament || {};
+            const goals = TOURNAMENT_GOALS.map(g => ({ ...g, done: g.check(gameState) }));
+            const doneCount = goals.filter(g => g.done).length;
+            const pct = Math.round(doneCount / goals.length * 100);
+            let html = `<div style="font-size:12px;color:#aaa;margin-bottom:8px;">Complete every objective once to earn the <strong style="color:#FFD700;">Iron Will Method</strong> — a permanent passive: +10% gains, +20% Knowledge forever.</div>`;
+            html += `<div style="background:#0a0a14;border-radius:3px;height:8px;margin-bottom:10px;overflow:hidden;">
+                <div style="background:linear-gradient(90deg,#FFD700,#FFA500);height:100%;width:${pct}%;"></div>
+            </div>
+            <div style="font-size:11px;color:#888;margin-bottom:8px;">${doneCount} / ${goals.length} complete</div>`;
+            goals.forEach(g => {
+                html += `<div style="display:flex;gap:8px;align-items:center;padding:5px 0;border-bottom:1px solid #222;">
+                    <span style="font-size:14px;">${g.done ? '✅' : '⬜'}</span>
+                    <span style="font-size:12px;color:${g.done ? '#8f8' : '#ccc'};">${g.label}</span>
+                </div>`;
+            });
+            if (t.completed && !t.claimed) {
+                html += `<button class="btn btn-success" style="margin-top:10px;width:100%;font-size:13px;" onclick="claimTournament()">Claim the Iron Will Method</button>`;
+            } else if (t.claimed) {
+                html += `<div style="margin-top:10px;text-align:center;color:#FFD700;font-weight:bold;font-size:13px;">★ The Iron Will Method is yours ★</div>`;
+            }
+            el.innerHTML = html;
+        }
+
         function renderApprentice() {
             const el = document.getElementById('apprenticeContent');
             if (!el) return;
@@ -6696,6 +6943,10 @@
             const tier = getCurrentTier();
             const knowledgeGain = dnf ? 0 : Math.max(10, Math.floor(compTotal / 12 * tier.knowledgeMult * getEndgameCompKnowledgeMult() * getMindCompKnowledgeMult() * getFederationBody().compK * (1 + ((gameState.legacy && gameState.legacy.coachingBonusPct) || 0) / 100)));
             if (knowledgeGain) gameState.knowledge += knowledgeGain;
+            // Tournament: record federation body win
+            if (!dnf && gameState.tournament && gameState.tournament.fedWins) {
+                gameState.tournament.fedWins[gameState.federationBody || 'ipf'] = true;
+            }
             gameState.competitionsEntered = (gameState.competitionsEntered || 0) + 1;
             // Track perfect meets (9/9)
             if (!dnf) {
@@ -6923,6 +7174,13 @@
         if (gameState.apprentice === undefined)      gameState.apprentice = null;
         if (gameState.apprenticeRetired === undefined) gameState.apprenticeRetired = 0;
         if (gameState.apprenticeLastTick === undefined) gameState.apprenticeLastTick = 0;
+        if (!gameState.coachDropinsFired) gameState.coachDropinsFired = {};
+        if (gameState.nextGymChatter === undefined) gameState.nextGymChatter = 0;
+        if (gameState.nextCoachCheck === undefined) gameState.nextCoachCheck = 0;
+        if (!gameState.tournament) gameState.tournament = { fedWins: { ipf: false, wrpf: false, usapl: false }, dailyCompleted: 0, completed: false, claimed: false };
+        if (!gameState.tournament.fedWins) gameState.tournament.fedWins = { ipf: false, wrpf: false, usapl: false };
+        if (gameState.tournament.dailyCompleted === undefined) gameState.tournament.dailyCompleted = 0;
+        if (gameState.personalMethod === undefined) gameState.personalMethod = false;
 
         // Initialise records from current save
         updateRecords();
@@ -6937,6 +7195,21 @@
                 if (triggered) gameState.unlockedFeatures[m.id] = true;
             });
         }
+
+        // Forward-compat: silently backfill NEW gated unlocks for existing saves
+        // that already satisfy the condition (so newly-tightened gates don't
+        // hide content the player already had access to).
+        (function backfillNewUnlocks() {
+            const newIds = ['variants_unlock','dailyChallenge_unlock','strongman_unlock','sponsor_unlock','fedBody_unlock','garage_unlock','mindTree_unlock'];
+            const _total = gameState.squat + gameState.bench + gameState.deadlift;
+            newIds.forEach(id => {
+                if (gameState.unlockedFeatures[id]) return;
+                const m = UNLOCK_MILESTONES.find(x => x.id === id);
+                if (m && m.check && m.check(gameState, _total)) {
+                    gameState.unlockedFeatures[id] = true; // silent — no story replay
+                }
+            });
+        })();
 
         // Restore UI controls from saved state
         document.getElementById('autoConvertToggle').checked = !!gameState.autoConvert;
