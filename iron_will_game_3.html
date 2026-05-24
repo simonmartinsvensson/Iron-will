@@ -1765,7 +1765,7 @@
                     <button onclick="document.getElementById('importModal').classList.add('active')" style="padding: 4px 10px; font-size: 11px; background: #37474F; color: white; border: none; border-radius: 3px; cursor: pointer;">📥 Import Save</button>
                 </div>
                 <div id="debugInfo" style="font-family: monospace; font-size: 10px; margin-top: 6px;">Ready</div>
-                <div style="font-size: 10px; color: #555; margin-top: 4px;">Last patch: <span style="color:#666;">2026-05-24 20:48</span></div>
+                <div style="font-size: 10px; color: #555; margin-top: 4px;">Last patch: <span style="color:#666;">2026-05-24 21:25</span></div>
             </div>
         </div>
 
@@ -1880,6 +1880,42 @@
                 <div id="mentorshipContent"></div>
             </div>
 
+            <!-- Lift Variants -->
+            <div class="partner-section" id="variantsSection">
+                <div class="section-title">Lift Style — pick a stance for each lift. Lasts until next prestige.</div>
+                <div id="variantsContent"></div>
+            </div>
+
+            <!-- Strongman -->
+            <div class="partner-section" id="strongmanSection" style="display:none;">
+                <div class="section-title">Strongman Side Events — random pop-up events outside powerlifting</div>
+                <div id="strongmanContent"></div>
+            </div>
+
+            <!-- Federation Body -->
+            <div class="partner-section" id="fedBodySection" style="display:none;">
+                <div class="section-title">Sanctioning Body — choose your federation's ruleset</div>
+                <div id="fedBodyContent"></div>
+            </div>
+
+            <!-- Sponsors -->
+            <div class="partner-section" id="sponsorSection" style="display:none;">
+                <div class="section-title">Sponsorships — passive Knowledge in exchange for a restriction</div>
+                <div id="sponsorContent"></div>
+            </div>
+
+            <!-- Garage Gym -->
+            <div class="partner-section" id="garageSection" style="display:none;">
+                <div class="section-title">Garage Gym — your own build, persists across all legacies</div>
+                <div id="garageContent"></div>
+            </div>
+
+            <!-- Active Coaching -->
+            <div class="partner-section" id="apprenticeSection" style="display:none;">
+                <div class="section-title">Active Coaching — take on an apprentice and grow them</div>
+                <div id="apprenticeContent"></div>
+            </div>
+
         </div><!-- end tab-gear -->
 
         <!-- Progress Tab -->
@@ -1951,6 +1987,18 @@
             <div class="log-section" id="hallOfFameSection" style="display:none;">
                 <div class="section-title">Hall of Fame — every legacy you have left behind</div>
                 <div id="hallOfFameContent"></div>
+            </div>
+
+            <!-- Daily Challenge -->
+            <div class="log-section" id="dailySection">
+                <div class="section-title">Daily Challenge — resets every UTC day</div>
+                <div id="dailyContent"></div>
+            </div>
+
+            <!-- Mind Tree -->
+            <div class="log-section" id="mindTreeSection">
+                <div class="section-title">Mind Tree — spend achievement points on permanent talents</div>
+                <div id="mindTreeContent"></div>
             </div>
 
             <!-- Achievements -->
@@ -2238,6 +2286,31 @@
             perfectMeets: 0,              // 9/9 meets achieved
             // Coaching legacy state (the meta-prestige loop)
             // gameState.legacy.legacyTier / hallOfFame / coachingBonusPct
+
+            // ── Second-wave additions ────────────────────────────────────────
+            // Mind Tree — achievement points + meta-talent grid (persist forever)
+            mindPointsSpent: 0,
+            mindTree: {},                 // { nodeId: rank }
+            // Daily challenge — rotates on calendar day
+            dailyChallenge: null,         // { id, day, target, progress, complete, claimed }
+            // Lift variants — chosen each cycle, reset on prestige
+            liftVariants: { squat: 'high_bar', bench: 'paused', deadlift: 'conventional' },
+            // Sponsors — one active sponsor at a time
+            sponsor: null,                // { id, name, restriction, kPerMin, since }
+            sponsorOffers: [],            // pending offers
+            lastSponsorCheck: 0,
+            // Strongman side events
+            strongmanCooldown: 0,
+            strongmanWins: 0,
+            strongmanCurrent: null,       // { eventId, deadline } if event is offered
+            // Federation body (sanctioning org). 'ipf' is the default and uses existing logic.
+            federationBody: 'ipf',
+            // Garage gym — persistent multi-cycle build (persist across legacies)
+            garage: { rooms: {} },        // { roomId: true }
+            // Active coaching — single named apprentice
+            apprentice: null,             // { name, age, focus, squat, bench, deadlift, technique, fame, since }
+            apprenticeRetired: 0,         // count of apprentices that finished their career
+            apprenticeLastTick: 0,
         };
 
         // Load saved game
@@ -2315,7 +2388,7 @@
 
             // Fatigue: net of build-up and passive recovery
             const fatigueRate  = getFatigueRate();
-            const recoveryRate = hasPerk('recovery') ? 0.2 : 0.1;
+            const recoveryRate = (hasPerk('recovery') ? 0.2 : 0.1) * getMindRecoveryMult() * getGarageRecoveryMult();
             const netFatigue   = fatigueRate - recoveryRate;
             gameState.fatigue  = Math.max(0, Math.min(1000, gameState.fatigue + netFatigue * elapsed));
 
@@ -2374,6 +2447,14 @@
             // Pantheon rival progression (offline)
             spawnPantheonRivalIfReady();
             if (gameState.currentPantheonRival) tickPantheonRival(elapsed);
+
+            // Second-wave offline: sponsor K, apprentice, strongman cooldown
+            tickSponsorKnowledge(elapsed);
+            tickApprentice(elapsed);
+            if (gameState.strongmanCooldown > 0) {
+                gameState.strongmanCooldown = Math.max(0, gameState.strongmanCooldown - elapsed);
+            }
+            // Mind Tree pacing — extra recovery accounted via getMindRecoveryMult below
 
             // Auto-convert PRs if enabled (capped at 500 offline PRs)
             let prsGained = 0;
@@ -2444,7 +2525,7 @@
             const motivationMult = 0.5 + (gameState.motivation / 200);
             const fatigueReduction = Math.max(0.1, 1 - (gameState.fatigue / 1200));
             const knowledgeBonus = Math.min(8, 1 + (gameState.knowledge * 0.001)); // caps at 8× at 7000 knowledge
-            const beltBonus      = (gameState.equipment && gameState.equipment.belt) ? 1.2 : 1;
+            const beltBonus      = (gameState.equipment && gameState.equipment.belt && !sponsorBlocks('belt')) ? 1.2 : 1;
             const supercomp      = hasPerk('supercomp') ? 1.15 : 1;
             const weightMult     = getWeightMultipliers().adapt;
             const nutritionMult  = gameState.nutrition === 'surplus' ? 1.10 : gameState.nutrition === 'deficit' ? 0.90 : 1;
@@ -2452,7 +2533,7 @@
             const peakMult       = (gameState.peaking > 0) ? 0.3 : 1;
             const gymMult        = 1 + GYM_TIERS[gameState.gymTier || 0].adaptBonus;
 
-            return baseRate * intensityMult * techniqueMult * motivationMult * fatigueReduction * knowledgeBonus * beltBonus * supercomp * weightMult * nutritionMult * partnerMult * peakMult * gymMult * getEndgameAdaptationMult();
+            return baseRate * intensityMult * techniqueMult * motivationMult * fatigueReduction * knowledgeBonus * beltBonus * supercomp * weightMult * nutritionMult * partnerMult * peakMult * gymMult * getEndgameAdaptationMult() * getMindAdaptationMult() * getGarageAdaptMult();
         }
 
         // Calculate fatigue rate
@@ -2464,7 +2545,7 @@
             const nutritionFatMult = gameState.nutrition === 'surplus' ? 1.12 : gameState.nutrition === 'deficit' ? 0.88 : 1;
             const peakMult         = (gameState.peaking > 0) ? 0.25 : 1;
             const glassMult = hasPerk('glass_cannon') ? 1.20 : 1;
-            return baseRate * intensityMult * resilienceMult * weightMult * nutritionFatMult * peakMult * glassMult;
+            return baseRate * intensityMult * resilienceMult * weightMult * nutritionFatMult * peakMult * glassMult * getVariantFatigueMult();
         }
 
         // Get adaptation cost for next PR — WR-relative so weight class doesn't affect pacing,
@@ -2658,6 +2739,14 @@
                 renderMastery();
                 renderPantheonRivals();
                 renderHallOfFame();
+                renderMindTree();
+                renderDaily();
+                renderVariants();
+                renderSponsors();
+                renderStrongman();
+                renderFederationBodies();
+                renderGarage();
+                renderApprentice();
             }
 
             // Peaking status display
@@ -2886,7 +2975,7 @@
             }
 
             // Technique improvement (low intensity training)
-            const hasChalk = gameState.equipment && gameState.equipment.chalk;
+            const hasChalk = gameState.equipment && gameState.equipment.chalk && !sponsorBlocks('chalk');
             const baseTechRate = hasPerk('tech_master') ? 1.0 : 0.5;
             const phaseTechMult = ((gameState.unlockedFeatures || {}).periodization)
                 ? TRAINING_PHASES[gameState.trainingBlock.phase].techRate : 1;
@@ -2899,7 +2988,7 @@
 
             // Passive fatigue recovery
             if (gameState.fatigue > 0) {
-                const recoveryRate = hasPerk('recovery') ? 0.2 : 0.1;
+                const recoveryRate = (hasPerk('recovery') ? 0.2 : 0.1) * getMindRecoveryMult() * getGarageRecoveryMult();
                 gameState.fatigue = Math.max(0, gameState.fatigue - recoveryRate * delta);
             }
 
@@ -2933,13 +3022,17 @@
             if (timeSinceLastPR > 120) {
                 const preWorkoutFloor = (gameState.equipment && gameState.equipment.preWorkout) ? 75 : 50;
                 const ironMindBonus   = perkCount('iron_mind') * 15;
-                const partnerBonus    = gameState.trainingPartner > 0 ? PARTNER_TIERS[gameState.trainingPartner - 1].motivBonus : 0;
-                const motFloor = Math.min(95, preWorkoutFloor + ironMindBonus + partnerBonus);
+                const partnerBonus    = sponsorBlocks('partner') ? 0 : (gameState.trainingPartner > 0 ? PARTNER_TIERS[gameState.trainingPartner - 1].motivBonus : 0);
+                const focusedBonus    = hasMindTalent('focused') ? 10 : 0;
+                const motCap          = sponsorMotCap();
+                const motFloor = Math.min(motCap - 5, preWorkoutFloor + ironMindBonus + partnerBonus + focusedBonus);
                 gameState.motivation = Math.max(motFloor, gameState.motivation - 0.1 * delta);
+                // Sponsor motivation cap
+                if (gameState.motivation > motCap) gameState.motivation = motCap;
             }
 
-            // Technique floor from gym tier
-            const gymTechFloor = GYM_TIERS[gameState.gymTier || 0].techFloor;
+            // Technique floor from gym tier (+ Mind Tree, + Garage Video Setup)
+            const gymTechFloor = GYM_TIERS[gameState.gymTier || 0].techFloor + (hasMindTalent('clear_eyes') ? 5 : 0) + getGarageTechFloor();
             if (gameState.technique < gymTechFloor) gameState.technique = gymTechFloor;
 
             // Mentorship — passive Knowledge gain (once unlocked)
@@ -2972,6 +3065,19 @@
 
             // Mastery — passive check (in case bodyweight or records shifted)
             checkMasteryUnlocks();
+
+            // Second-wave ticks
+            tickSponsorKnowledge(delta);
+            tickStrongman(delta);
+            tickApprentice(delta);
+            checkDailyChallenge();
+            // Generate a sponsor offer periodically (every ~5 min real time)
+            if ((gameState.unlockedFeatures || {}).competition) {
+                if (now - (gameState.lastSponsorCheck || 0) > 5 * 60 * 1000) {
+                    gameState.lastSponsorCheck = now;
+                    if (!gameState.sponsor && Math.random() < 0.5) generateSponsorOffer();
+                }
+            }
 
             // Life events (trigger every 3–8 minutes, only after competition is unlocked)
             if ((gameState.unlockedFeatures || {}).competition) {
@@ -3075,7 +3181,7 @@
             if (selectedLift === 'deadlift' && hasPerk('dl_spec'))    gainMult += 0.3;
             // Sticking point penalty (unless addressed)
             const acc = gameState.accessories || {};
-            if ((acc[selectedLift] || 0) <= 0 && getActiveStickingPoint(selectedLift)) gainMult *= 0.75;
+            if ((acc[selectedLift] || 0) <= 0 && getActiveStickingPoint(selectedLift)) gainMult *= (1 - 0.25 * getGarageStickingMult());
             // Injury halves gains during recovery; chronic gives permanent -20% until treated
             if ((inj[selectedLift] || 0) > 0) gainMult *= 0.5;
             if ((gameState.chronicInjuries || {})[selectedLift]) gainMult *= 0.80;
@@ -3216,6 +3322,10 @@
         function deloadWeek() {
             if (gameState.deloadCooldown > 0) {
                 showNotification('Deload on cooldown', 'warning');
+                return;
+            }
+            if (sponsorBlocks('deload')) {
+                showNotification('Your sponsor forbids deloads', 'warning');
                 return;
             }
             
@@ -3670,6 +3780,21 @@
 
             const coachBtn = document.getElementById('retireToCoachBtn');
             if (coachBtn) coachBtn.style.display = canRetireToCoach() ? '' : 'none';
+
+            // Second-wave sections
+            const total = gameState.squat + gameState.bench + gameState.deadlift;
+            const variantsSec = document.getElementById('variantsSection');
+            if (variantsSec) variantsSec.style.display = gameState.prestigeCount >= 2 ? '' : 'none';
+            const strongmanSec = document.getElementById('strongmanSection');
+            if (strongmanSec) strongmanSec.style.display = total >= 300 ? '' : 'none';
+            const fedBodySec = document.getElementById('fedBodySection');
+            if (fedBodySec) fedBodySec.style.display = f.competition ? '' : 'none';
+            const sponsorSec = document.getElementById('sponsorSection');
+            if (sponsorSec) sponsorSec.style.display = f.competition ? '' : 'none';
+            const garageSec = document.getElementById('garageSection');
+            if (garageSec) garageSec.style.display = gameState.prestigeCount >= 2 ? '' : 'none';
+            const apprenticeSec = document.getElementById('apprenticeSection');
+            if (apprenticeSec) apprenticeSec.style.display = f.coaching ? '' : 'none';
         }
 
         // ── Perks ────────────────────────────────────────────────────────────
@@ -3854,7 +3979,7 @@
 
         function getInjuryChance() {
             if (gameState.fatigue <= 820) return 0;
-            return Math.min(0.15, (gameState.fatigue - 820) / 1200);
+            return Math.min(0.15, (gameState.fatigue - 820) / 1200) * getMindInjuryMult();
         }
 
         // ── All-time records ─────────────────────────────────────────────────
@@ -4678,6 +4803,11 @@
                 const lifePRs = ((gameState.legacy && gameState.legacy.allTimePRs) || 0) + (gameState.prCount || 0);
                 m *= 1 + lifeStacks * 0.01 * Math.floor(lifePRs / 200);
             }
+            // Mind Tree, Variants, Garage, Federation Body
+            m *= getMindGainBonus();
+            m *= getVariantGainMult(lift);
+            m *= getGarageGainMult();
+            m *= getFederationBody().gain;
             return m;
         }
 
@@ -4688,6 +4818,8 @@
             if (hasPantheonPerk('cynics_edge') && (gameState.motivation || 0) >= 90) c += 0.20;
             // Gambler's Iron — flat 15% always
             if (hasPerk('gamblers_iron')) c += 0.15;
+            // Mind Tree: Composure
+            if (hasMindTalent('composure')) c += 0.05;
             return Math.min(0.85, c);
         }
 
@@ -4707,6 +4839,9 @@
                 const beaten = (gameState.pantheonRivals || []).length;
                 m *= 1 + 0.08 * beaten;
             }
+            // Mind Tree (Studious) + Garage Trophy Wall + (Coach's Discipline applied above)
+            m *= getMindKnowledgeMult();
+            m *= getGarageTrophyMult();
             return m;
         }
 
@@ -4718,6 +4853,688 @@
         function getEndgameAdaptationMult() {
             // Prodigy's Gift — +20% adaptation rate.
             return hasPantheonPerk('prodigys_gift') ? 1.20 : 1;
+        }
+
+        // ════════════════════════════════════════════════════════════════════
+        //  SECOND-WAVE EXPANSION
+        //  Mind Tree · Daily Challenges · Lift Variants · Sponsors ·
+        //  Strongman · Federation Bodies · Garage Gym · Active Coaching
+        // ════════════════════════════════════════════════════════════════════
+
+        // ── Mind Tree (Achievement Points + meta-talents) ────────────────────
+        // Each unlocked achievement grants 1 Mind Point. Spend them on talents
+        // that persist across prestiges AND legacies. Effects stack with perks.
+
+        const MIND_TREE = [
+            // BODY path
+            { id: 'foundation',     name: 'Solid Foundation', path: 'Body',     cost: 2, desc: '+5% to all PR gains' },
+            { id: 'iron_joints',    name: 'Iron Joints',      path: 'Body',     cost: 2, desc: 'Injury chance reduced by 20%' },
+            { id: 'adaptive',       name: 'Adaptive',         path: 'Body',     cost: 3, desc: 'Adaptation rate +10%' },
+            { id: 'pacing',         name: 'Pacing',           path: 'Body',     cost: 3, desc: 'Passive fatigue recovery +25%' },
+            { id: 'built_different',name: 'Built Different',  path: 'Body',     cost: 5, desc: '+10% to all gains (capstone — needs 4 Body talents)' },
+            // MIND path
+            { id: 'focused',        name: 'Focused',          path: 'Mind',     cost: 2, desc: 'Motivation floor +10' },
+            { id: 'studious',       name: 'Studious',         path: 'Mind',     cost: 2, desc: '+10% Knowledge from prestige' },
+            { id: 'clear_eyes',     name: 'Clear Eyes',       path: 'Mind',     cost: 3, desc: 'Technique floor +5' },
+            { id: 'composure',      name: 'Composure',        path: 'Mind',     cost: 3, desc: 'Critical PR chance +5%' },
+            { id: 'iron_mind',      name: 'Iron Mind',        path: 'Mind',     cost: 5, desc: '+25% Knowledge from competitions (capstone — needs 4 Mind talents)' },
+            // PLATFORM path
+            { id: 'cool_pressure',  name: 'Cool Under Pressure', path: 'Platform', cost: 2, desc: 'Meet attempt success +5%' },
+            { id: 'stage_lights',   name: 'Stage Lights',     path: 'Platform', cost: 2, desc: '+15% Knowledge from competition wins' },
+            { id: 'nerves',         name: 'Veteran Nerves',   path: 'Platform', cost: 3, desc: 'Bombout chance halved' },
+            { id: 'quick_recovery', name: 'Quick Turnaround', path: 'Platform', cost: 3, desc: 'Competition cooldown −25%' },
+            { id: 'crowd_power',    name: 'Crowd Power',      path: 'Platform', cost: 5, desc: 'Motivation never drops below 50 during a meet (capstone — needs 4 Platform talents)' },
+        ];
+
+        function getEarnedAchievementCount() {
+            if (!gameState.achievements) return 0;
+            return ACHIEVEMENT_DEFS.filter(a => gameState.achievements[a.id]).length;
+        }
+        function getMindPointsAvailable() {
+            return Math.max(0, getEarnedAchievementCount() - (gameState.mindPointsSpent || 0));
+        }
+        function hasMindTalent(id) {
+            return !!(gameState.mindTree && gameState.mindTree[id]);
+        }
+        function countMindPathTalents(path) {
+            return MIND_TREE.filter(t => t.path === path && hasMindTalent(t.id)).length;
+        }
+        function canBuyMindTalent(t) {
+            if (hasMindTalent(t.id)) return false;
+            if (getMindPointsAvailable() < t.cost) return false;
+            // Capstones need 4 talents in the same path already.
+            const capstones = ['built_different','iron_mind','crowd_power'];
+            if (capstones.includes(t.id) && countMindPathTalents(t.path) < 4) return false;
+            return true;
+        }
+        function buyMindTalent(id) {
+            const t = MIND_TREE.find(x => x.id === id);
+            if (!t || !canBuyMindTalent(t)) return;
+            if (!gameState.mindTree) gameState.mindTree = {};
+            gameState.mindTree[id] = true;
+            gameState.mindPointsSpent = (gameState.mindPointsSpent || 0) + t.cost;
+            showNotification(`Talent learned — ${t.name}`, 'pr');
+            addJournalEntry(`Mind Tree: learned "${t.name}". ${t.desc}.`);
+            renderMindTree();
+            updateUI();
+            saveGame();
+        }
+
+        function renderMindTree() {
+            const el = document.getElementById('mindTreeContent');
+            if (!el) return;
+            const earned = getEarnedAchievementCount();
+            const avail  = getMindPointsAvailable();
+            const spent  = gameState.mindPointsSpent || 0;
+            const pathColors = { Body: '#4CAF50', Mind: '#2196F3', Platform: '#FF9800' };
+            let html = `<div style="display:flex;justify-content:space-between;margin-bottom:10px;font-size:12px;color:#aaa;">
+                <span>Achievements earned: <strong style="color:#FFD700;">${earned}</strong></span>
+                <span>Mind Points: <strong style="color:#FFD700;">${avail}</strong> available · ${spent} spent</span>
+            </div>`;
+            ['Body','Mind','Platform'].forEach(path => {
+                html += `<div style="margin-bottom:10px;">
+                    <div style="color:${pathColors[path]};font-weight:bold;font-size:12px;text-transform:uppercase;letter-spacing:1px;margin-bottom:6px;">${path}</div>
+                    <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(160px,1fr));gap:6px;">`;
+                MIND_TREE.filter(t => t.path === path).forEach(t => {
+                    const owned = hasMindTalent(t.id);
+                    const buyable = canBuyMindTalent(t);
+                    html += `<div style="background:${owned?'#0f1a0f':'#1a1a1a'};border:1px solid ${owned?'#2a6a2a':'#333'};border-left:3px solid ${pathColors[path]};border-radius:5px;padding:8px;">
+                        <div style="font-size:12px;font-weight:bold;color:${owned?'#8fd88f':'#ddd'};">${owned?'✓ ':''}${t.name}</div>
+                        <div style="font-size:11px;color:#888;margin:3px 0;">${t.desc}</div>
+                        ${owned
+                            ? `<div style="font-size:10px;color:#8fd88f;">LEARNED</div>`
+                            : `<button class="btn btn-primary" style="padding:3px 8px;font-size:11px;margin-top:3px;width:100%;" onclick="buyMindTalent('${t.id}')" ${buyable?'':'disabled'}>Learn (${t.cost} pt)</button>`}
+                    </div>`;
+                });
+                html += `</div></div>`;
+            });
+            el.innerHTML = html;
+        }
+
+        function getMindGainBonus() {
+            let m = 1;
+            if (hasMindTalent('foundation'))       m *= 1.05;
+            if (hasMindTalent('built_different'))  m *= 1.10;
+            return m;
+        }
+        function getMindAdaptationMult() {
+            return hasMindTalent('adaptive') ? 1.10 : 1;
+        }
+        function getMindKnowledgeMult() {
+            return hasMindTalent('studious') ? 1.10 : 1;
+        }
+        function getMindCompKnowledgeMult() {
+            let m = 1;
+            if (hasMindTalent('stage_lights')) m *= 1.15;
+            if (hasMindTalent('iron_mind'))    m *= 1.25;
+            return m;
+        }
+        function getMindRecoveryMult() {
+            return hasMindTalent('pacing') ? 1.25 : 1;
+        }
+        function getMindInjuryMult() {
+            return hasMindTalent('iron_joints') ? 0.80 : 1;
+        }
+
+        // ── Daily Challenge ─────────────────────────────────────────────────
+        // One challenge per UTC day. Tracks player actions during that day.
+
+        const DAILY_POOL = [
+            { id: 'd_pr_5',     label: 'Hit 5 PRs today',                       type: 'prs',         target: 5  },
+            { id: 'd_pr_10',    label: 'Hit 10 PRs today',                      type: 'prs',         target: 10 },
+            { id: 'd_comp_1',   label: 'Win a competition today',               type: 'compWins',    target: 1  },
+            { id: 'd_total_50', label: 'Add 50 kg to your total today',         type: 'totalGain',   target: 50 },
+            { id: 'd_total_100',label: 'Add 100 kg to your total today',        type: 'totalGain',   target: 100},
+            { id: 'd_cycle',    label: 'Complete a prestige cycle today',       type: 'cycles',      target: 1  },
+            { id: 'd_strongman',label: 'Win a strongman event today',           type: 'strongman',   target: 1  },
+        ];
+
+        function todayKey() {
+            const d = new Date();
+            return d.getUTCFullYear() + '-' + (d.getUTCMonth()+1) + '-' + d.getUTCDate();
+        }
+
+        function refreshDailyChallenge() {
+            const today = todayKey();
+            if (gameState.dailyChallenge && gameState.dailyChallenge.day === today) return;
+            // New day — pick a fresh challenge, snapshot baselines
+            const def = DAILY_POOL[Math.floor(Math.random() * DAILY_POOL.length)];
+            gameState.dailyChallenge = {
+                id: def.id, day: today, type: def.type, target: def.target, label: def.label,
+                baseTotal: Math.floor(gameState.squat + gameState.bench + gameState.deadlift),
+                basePRs: (gameState.prCount || 0) + ((gameState.legacy && gameState.legacy.allTimePRs) || 0),
+                baseComps: gameState.competitionsEntered || 0,
+                baseCycles: gameState.prestigeCount || 1,
+                baseStrong: gameState.strongmanWins || 0,
+                progress: 0, complete: false, claimed: false,
+            };
+        }
+
+        function checkDailyChallenge() {
+            refreshDailyChallenge();
+            const d = gameState.dailyChallenge;
+            if (!d || d.claimed) return;
+            const total = Math.floor(gameState.squat + gameState.bench + gameState.deadlift);
+            const prs   = (gameState.prCount || 0) + ((gameState.legacy && gameState.legacy.allTimePRs) || 0);
+            const comps = gameState.competitionsEntered || 0;
+            const cyc   = gameState.prestigeCount || 1;
+            const stron = gameState.strongmanWins || 0;
+            switch (d.type) {
+                case 'prs':       d.progress = Math.max(0, prs - d.basePRs); break;
+                case 'compWins':  d.progress = Math.max(0, comps - d.baseComps); break;
+                case 'totalGain': d.progress = Math.max(0, total - d.baseTotal); break;
+                case 'cycles':    d.progress = Math.max(0, cyc - d.baseCycles); break;
+                case 'strongman': d.progress = Math.max(0, stron - d.baseStrong); break;
+            }
+            if (!d.complete && d.progress >= d.target) {
+                d.complete = true;
+                showNotification(`Daily challenge ready — ${d.label}`, 'success');
+            }
+        }
+
+        function claimDailyChallenge() {
+            const d = gameState.dailyChallenge;
+            if (!d || !d.complete || d.claimed) return;
+            const reward = 50 + 15 * (gameState.prestigeCount || 1);
+            gameState.knowledge += reward;
+            d.claimed = true;
+            addJournalEntry(`Daily challenge complete: "${d.label}". +${reward} Knowledge.`);
+            showNotification(`Daily +${reward} Knowledge claimed`, 'pr');
+            renderDaily();
+            updateUI(); saveGame();
+        }
+
+        function renderDaily() {
+            const el = document.getElementById('dailyContent');
+            if (!el) return;
+            checkDailyChallenge();
+            const d = gameState.dailyChallenge;
+            if (!d) { el.innerHTML = '<div style="color:#666;font-size:12px;padding:8px;">No challenge today.</div>'; return; }
+            const pct = Math.min(100, Math.round((d.progress / d.target) * 100));
+            const reward = 50 + 15 * (gameState.prestigeCount || 1);
+            el.innerHTML = `<div style="background:#1a1a2a;border:1px solid #334;border-radius:6px;padding:10px;">
+                <div style="display:flex;justify-content:space-between;align-items:baseline;">
+                    <strong style="color:#ddd;font-size:13px;">${d.claimed ? '✓ ' : ''}${d.label}</strong>
+                    <span style="color:#888;font-size:11px;">${d.day}</span>
+                </div>
+                <div style="background:#0a0a14;border-radius:3px;height:8px;margin:6px 0;overflow:hidden;">
+                    <div style="background:linear-gradient(90deg,#4CAF50,#8fd88f);height:100%;width:${pct}%;"></div>
+                </div>
+                <div style="display:flex;justify-content:space-between;font-size:11px;color:#888;">
+                    <span>${d.progress} / ${d.target}</span>
+                    <span>Reward: +${reward} K</span>
+                </div>
+                ${d.complete && !d.claimed ? `<button class="btn btn-success" style="margin-top:6px;width:100%;font-size:12px;padding:4px;" onclick="claimDailyChallenge()">Claim +${reward} K</button>` : ''}
+            </div>`;
+        }
+
+        // ── Lift Variants ───────────────────────────────────────────────────
+        // Chosen per cycle. Each lift has 3 stance choices with tradeoffs.
+
+        const LIFT_VARIANTS = {
+            squat: [
+                { id: 'high_bar',   name: 'High Bar',   desc: 'Balanced — no modifiers' },
+                { id: 'low_bar',    name: 'Low Bar',    desc: '+10% squat gains · −5% bench gains' },
+                { id: 'safety_bar', name: 'Safety Bar', desc: '+5% squat technique gain · −5% bench/dl injury risk' },
+            ],
+            bench: [
+                { id: 'paused',       name: 'Paused',       desc: 'Balanced — meet-style' },
+                { id: 'touch_and_go', name: 'Touch &amp; Go',   desc: '+8% bench gains · +15% fatigue rate' },
+                { id: 'wide_grip',    name: 'Wide Grip',    desc: '+5% bench gains · −5% bench in competition' },
+            ],
+            deadlift: [
+                { id: 'conventional', name: 'Conventional', desc: 'Balanced — no modifiers' },
+                { id: 'sumo',         name: 'Sumo',         desc: '+5% deadlift gains · −5% sticking penalty on squat' },
+                { id: 'deficit',      name: 'Deficit',      desc: '+8% deadlift gains · +10% fatigue rate' },
+            ],
+        };
+
+        function setVariant(lift, id) {
+            if (!gameState.liftVariants) gameState.liftVariants = {};
+            gameState.liftVariants[lift] = id;
+            renderVariants();
+            updateUI(); saveGame();
+        }
+        function getVariant(lift) {
+            return (gameState.liftVariants && gameState.liftVariants[lift]) || LIFT_VARIANTS[lift][0].id;
+        }
+        function getVariantGainMult(lift) {
+            let m = 1;
+            const v = getVariant(lift);
+            if (lift === 'squat'  && v === 'low_bar')      m *= 1.10;
+            if (lift === 'bench'  && v === 'touch_and_go') m *= 1.08;
+            if (lift === 'bench'  && v === 'wide_grip')    m *= 1.05;
+            if (lift === 'deadlift'&& v === 'sumo')        m *= 1.05;
+            if (lift === 'deadlift'&& v === 'deficit')     m *= 1.08;
+            // Cross-effects (low_bar squat hurts bench)
+            if (lift === 'bench' && getVariant('squat') === 'low_bar') m *= 0.95;
+            return m;
+        }
+        function getVariantFatigueMult() {
+            let m = 1;
+            if (getVariant('bench')    === 'touch_and_go') m *= 1.15;
+            if (getVariant('deadlift') === 'deficit')      m *= 1.10;
+            return m;
+        }
+
+        function renderVariants() {
+            const el = document.getElementById('variantsContent');
+            if (!el) return;
+            let html = '';
+            ['squat','bench','deadlift'].forEach(lift => {
+                const labels = { squat: 'Squat', bench: 'Bench', deadlift: 'Deadlift' };
+                const cur = getVariant(lift);
+                html += `<div style="margin-bottom:8px;">
+                    <div style="font-size:12px;color:#aaa;text-transform:uppercase;letter-spacing:0.5px;margin-bottom:4px;">${labels[lift]} Style</div>
+                    <div style="display:grid;grid-template-columns:repeat(3,1fr);gap:5px;">`;
+                LIFT_VARIANTS[lift].forEach(v => {
+                    const active = cur === v.id;
+                    html += `<button class="btn ${active?'btn-success':'btn-primary'}" style="padding:6px;font-size:11px;text-align:left;line-height:1.2;${active?'':'opacity:0.8;'}" onclick="setVariant('${lift}','${v.id}')">
+                        <strong>${v.name}</strong><br><span style="font-size:10px;opacity:0.85;">${v.desc}</span>
+                    </button>`;
+                });
+                html += `</div></div>`;
+            });
+            el.innerHTML = html;
+        }
+
+        // ── Sponsors ────────────────────────────────────────────────────────
+
+        const SPONSOR_DEFS = [
+            { id: 's_plates',  name: 'Iron Plates Co.', kPerMin: 0.10, restriction: 'no_chalk',     restrictionDesc: "You can't use chalk" },
+            { id: 's_belt',    name: 'PowerBelt Inc.',  kPerMin: 0.15, restriction: 'no_belt',      restrictionDesc: "You can't use a lifting belt" },
+            { id: 's_strict',  name: 'Strict Standards',kPerMin: 0.20, restriction: 'no_deload',    restrictionDesc: "You can't take deloads" },
+            { id: 's_pure',    name: 'PurePower Drinks',kPerMin: 0.07, restriction: 'mot_cap',      restrictionDesc: "Motivation cap reduced to 80" },
+            { id: 's_speed',   name: 'BarSpeed Gear',   kPerMin: 0.13, restriction: 'no_partner',   restrictionDesc: "Training partner inactive" },
+        ];
+
+        function sponsorBlocks(action) {
+            if (!gameState.sponsor) return false;
+            const r = gameState.sponsor.restriction;
+            if (action === 'chalk'   && r === 'no_chalk')  return true;
+            if (action === 'belt'    && r === 'no_belt')   return true;
+            if (action === 'deload'  && r === 'no_deload') return true;
+            if (action === 'partner' && r === 'no_partner')return true;
+            return false;
+        }
+        function sponsorMotCap() {
+            return (gameState.sponsor && gameState.sponsor.restriction === 'mot_cap') ? 80 : 100;
+        }
+        function generateSponsorOffer() {
+            if (gameState.sponsor) return; // already sponsored
+            if (gameState.sponsorOffers.length >= 3) return;
+            const used = gameState.sponsorOffers.map(o => o.id);
+            const pool = SPONSOR_DEFS.filter(d => !used.includes(d.id));
+            if (pool.length === 0) return;
+            const def = pool[Math.floor(Math.random() * pool.length)];
+            gameState.sponsorOffers.push({ id: def.id, since: Date.now() });
+            showNotification(`Sponsor offer — ${def.name}`, 'info');
+        }
+        function acceptSponsor(id) {
+            const def = SPONSOR_DEFS.find(d => d.id === id);
+            if (!def || gameState.sponsor) return;
+            gameState.sponsor = { id: def.id, since: Date.now() };
+            gameState.sponsorOffers = [];
+            addJournalEntry(`Signed with ${def.name}. ${def.restrictionDesc}.`);
+            showNotification(`Sponsored by ${def.name}`, 'pr');
+            renderSponsors(); updateUI(); saveGame();
+        }
+        function declineSponsor(id) {
+            gameState.sponsorOffers = gameState.sponsorOffers.filter(o => o.id !== id);
+            renderSponsors();
+        }
+        function endSponsor() {
+            if (!gameState.sponsor) return;
+            const def = SPONSOR_DEFS.find(d => d.id === gameState.sponsor.id);
+            addJournalEntry(`Ended deal with ${def ? def.name : 'sponsor'}.`);
+            gameState.sponsor = null;
+            renderSponsors(); updateUI(); saveGame();
+        }
+        function tickSponsorKnowledge(elapsedSec) {
+            if (!gameState.sponsor) return;
+            const def = SPONSOR_DEFS.find(d => d.id === gameState.sponsor.id);
+            if (!def) return;
+            gameState.knowledge += (def.kPerMin / 60) * elapsedSec;
+        }
+
+        function renderSponsors() {
+            const el = document.getElementById('sponsorContent');
+            if (!el) return;
+            let html = '';
+            if (gameState.sponsor) {
+                const def = SPONSOR_DEFS.find(d => d.id === gameState.sponsor.id);
+                html += `<div style="background:#0a1a2a;border:1px solid #2a4a6a;border-radius:6px;padding:10px;margin-bottom:8px;">
+                    <div style="display:flex;justify-content:space-between;align-items:baseline;">
+                        <strong style="color:#aaf;">Active — ${def.name}</strong>
+                        <span style="font-size:11px;color:#8f8;">+${def.kPerMin.toFixed(2)} K/min</span>
+                    </div>
+                    <div style="font-size:11px;color:#f88;margin-top:4px;">Restriction: ${def.restrictionDesc}</div>
+                    <button class="btn btn-warning" style="padding:3px 10px;font-size:11px;margin-top:6px;" onclick="endSponsor()">End deal</button>
+                </div>`;
+            } else if (gameState.sponsorOffers.length > 0) {
+                html += `<div style="font-size:11px;color:#888;margin-bottom:6px;">${gameState.sponsorOffers.length} pending offer${gameState.sponsorOffers.length>1?'s':''}</div>`;
+                gameState.sponsorOffers.forEach(o => {
+                    const def = SPONSOR_DEFS.find(d => d.id === o.id);
+                    if (!def) return;
+                    html += `<div style="background:#1a1a1a;border:1px solid #444;border-radius:6px;padding:10px;margin-bottom:6px;">
+                        <strong style="color:#ddd;">${def.name}</strong>
+                        <div style="font-size:11px;color:#aaa;margin:3px 0;">+${def.kPerMin.toFixed(2)} K/min passive · ${def.restrictionDesc}</div>
+                        <div style="display:flex;gap:4px;margin-top:5px;">
+                            <button class="btn btn-success" style="padding:3px 10px;font-size:11px;flex:1;" onclick="acceptSponsor('${def.id}')">Sign</button>
+                            <button class="btn btn-primary" style="padding:3px 10px;font-size:11px;flex:1;" onclick="declineSponsor('${def.id}')">Decline</button>
+                        </div>
+                    </div>`;
+                });
+            } else {
+                html += `<div style="color:#666;font-size:12px;padding:8px;">No sponsor active. Offers appear over time once you reach competition level.</div>`;
+            }
+            el.innerHTML = html;
+        }
+
+        // ── Strongman Side Events ───────────────────────────────────────────
+
+        const STRONGMAN_EVENTS = [
+            { id: 'log_press',    name: 'Log Press',     uses: 'bench',    needed: 0.55, baseK: 40 },
+            { id: 'atlas_stones', name: 'Atlas Stones',  uses: 'deadlift', needed: 0.50, baseK: 60 },
+            { id: 'farmers',      name: "Farmer's Walk", uses: 'composite',needed: 0.55, baseK: 70 },
+            { id: 'yoke',         name: 'Yoke Walk',     uses: 'squat',    needed: 0.50, baseK: 50 },
+        ];
+
+        function getStrongmanRelevant(eventDef) {
+            if (eventDef.uses === 'composite') return (gameState.squat + gameState.deadlift) / 2;
+            return gameState[eventDef.uses];
+        }
+        function spawnStrongmanEvent() {
+            if (gameState.strongmanCurrent) return;
+            if (gameState.strongmanCooldown > 0) return;
+            const total = gameState.squat + gameState.bench + gameState.deadlift;
+            if (total < 300) return;
+            const def = STRONGMAN_EVENTS[Math.floor(Math.random() * STRONGMAN_EVENTS.length)];
+            gameState.strongmanCurrent = { eventId: def.id, expires: Date.now() + 5 * 60 * 1000 };
+            showNotification(`Strongman event today — ${def.name}!`, 'info');
+        }
+        function attemptStrongman() {
+            const cur = gameState.strongmanCurrent;
+            if (!cur) return;
+            const def = STRONGMAN_EVENTS.find(d => d.id === cur.eventId);
+            if (!def) return;
+            const wr = WORLD_RECORDS[getWeightClass(gameState.bodyweight||83).max] || WORLD_RECORDS[83];
+            const refer = def.uses === 'composite' ? (wr.squat + wr.deadlift) / 2 : wr[def.uses];
+            const relevant = getStrongmanRelevant(def);
+            const ratio = relevant / refer;
+            // Win if ratio > needed; otherwise probabilistic with technique
+            let chance = Math.min(0.95, Math.max(0.05, (ratio - def.needed * 0.7) + gameState.technique / 200));
+            const win = Math.random() < chance;
+            // Garage gym room cuts cooldown
+            const cdMult = (gameState.garage && gameState.garage.rooms && gameState.garage.rooms.strongman_pit) ? 0.5 : 1;
+            gameState.strongmanCooldown = 600 * cdMult;
+            gameState.strongmanCurrent = null;
+            if (win) {
+                gameState.strongmanWins = (gameState.strongmanWins || 0) + 1;
+                const k = def.baseK + Math.floor(Math.random() * def.baseK * 0.5);
+                gameState.knowledge += k;
+                addJournalEntry(`Won ${def.name} — improvised but won. +${k} Knowledge.`);
+                showNotification(`${def.name} — won! +${k} Knowledge`, 'pr');
+            } else {
+                gameState.motivation = Math.max(30, gameState.motivation - 8);
+                addJournalEntry(`${def.name} — couldn't finish. The bar wasn't built for this.`);
+                showNotification(`${def.name} — failed. Motivation −8`, 'warning');
+            }
+            renderStrongman(); updateUI(); saveGame();
+        }
+        function passStrongman() {
+            gameState.strongmanCurrent = null;
+            renderStrongman();
+        }
+        function tickStrongman(delta) {
+            if (gameState.strongmanCooldown > 0) {
+                gameState.strongmanCooldown = Math.max(0, gameState.strongmanCooldown - delta);
+            }
+            if (gameState.strongmanCurrent && Date.now() > gameState.strongmanCurrent.expires) {
+                gameState.strongmanCurrent = null;
+            }
+            // Try to spawn one
+            if (Math.random() < 0.003) spawnStrongmanEvent();
+        }
+        function renderStrongman() {
+            const el = document.getElementById('strongmanContent');
+            if (!el) return;
+            const cur = gameState.strongmanCurrent;
+            if (!cur) {
+                if (gameState.strongmanCooldown > 0) {
+                    const m = Math.floor(gameState.strongmanCooldown / 60);
+                    const s = Math.floor(gameState.strongmanCooldown % 60);
+                    el.innerHTML = `<div style="color:#666;font-size:12px;padding:8px;">Next event possible in ~${m}m ${s}s. Won: ${gameState.strongmanWins || 0}</div>`;
+                } else {
+                    el.innerHTML = `<div style="color:#666;font-size:12px;padding:8px;">No event right now. Watch for pop-up offers.</div>`;
+                }
+                return;
+            }
+            const def = STRONGMAN_EVENTS.find(d => d.id === cur.eventId);
+            const wr = WORLD_RECORDS[getWeightClass(gameState.bodyweight||83).max] || WORLD_RECORDS[83];
+            const refer = def.uses === 'composite' ? (wr.squat + wr.deadlift) / 2 : wr[def.uses];
+            const relevant = getStrongmanRelevant(def);
+            const ratio = relevant / refer;
+            let chance = Math.min(0.95, Math.max(0.05, (ratio - def.needed * 0.7) + gameState.technique / 200));
+            const remaining = Math.max(0, Math.floor((cur.expires - Date.now()) / 1000));
+            el.innerHTML = `<div style="background:#2a1e0a;border:1px solid #6a4a0a;border-radius:6px;padding:10px;">
+                <div style="display:flex;justify-content:space-between;">
+                    <strong style="color:#FFD700;">${def.name}</strong>
+                    <span style="font-size:11px;color:#aaa;">expires in ${remaining}s</span>
+                </div>
+                <div style="font-size:11px;color:#aaa;margin:5px 0;">Uses your ${def.uses === 'composite' ? 'squat + deadlift' : def.uses} · est. success: ${Math.round(chance * 100)}%</div>
+                <div style="display:flex;gap:4px;margin-top:6px;">
+                    <button class="btn btn-success" style="padding:5px 10px;font-size:12px;flex:1;" onclick="attemptStrongman()">Take a shot</button>
+                    <button class="btn btn-primary" style="padding:5px 10px;font-size:12px;flex:1;" onclick="passStrongman()">Pass</button>
+                </div>
+            </div>`;
+        }
+
+        // ── Federation Body (sanctioning org) ───────────────────────────────
+
+        const FEDERATION_BODIES = [
+            { id: 'ipf',   name: 'IPF',   desc: 'Default — drug-tested, classic raw. No modifiers.',                  compK: 1.0,  gain: 1.0  },
+            { id: 'wrpf',  name: 'WRPF',  desc: '+20% Knowledge from competitions · Looser drug-testing means looser standards (−5% PR gains).', compK: 1.20, gain: 0.95 },
+            { id: 'usapl', name: 'USAPL', desc: '+10% PR gains (rigorous discipline) · −10% Knowledge from competitions.', compK: 0.90, gain: 1.10 },
+        ];
+        function getFederationBody() {
+            return FEDERATION_BODIES.find(b => b.id === gameState.federationBody) || FEDERATION_BODIES[0];
+        }
+        function setFederationBody(id) {
+            if (!FEDERATION_BODIES.find(b => b.id === id)) return;
+            gameState.federationBody = id;
+            addJournalEntry(`Switched sanctioning body to ${FEDERATION_BODIES.find(b=>b.id===id).name}.`);
+            renderFederationBodies(); updateUI(); saveGame();
+        }
+        function renderFederationBodies() {
+            const el = document.getElementById('fedBodyContent');
+            if (!el) return;
+            const cur = gameState.federationBody || 'ipf';
+            let html = '';
+            FEDERATION_BODIES.forEach(b => {
+                const active = b.id === cur;
+                html += `<div style="background:${active?'#0a1a2a':'#1a1a1a'};border:1px solid ${active?'#2a4a6a':'#444'};border-radius:5px;padding:8px;margin-bottom:6px;">
+                    <div style="display:flex;justify-content:space-between;align-items:baseline;">
+                        <strong style="color:${active?'#aaf':'#ddd'};">${active?'✓ ':''}${b.name}</strong>
+                        ${active ? '<span style="font-size:10px;color:#8f8;">ACTIVE</span>' : `<button class="btn btn-primary" style="padding:3px 8px;font-size:11px;" onclick="setFederationBody('${b.id}')">Switch</button>`}
+                    </div>
+                    <div style="font-size:11px;color:#aaa;margin-top:3px;">${b.desc}</div>
+                </div>`;
+            });
+            el.innerHTML = html;
+        }
+
+        // ── Garage Gym (persistent multi-cycle build) ───────────────────────
+
+        const GARAGE_ROOMS = [
+            { id: 'platform',     name: 'Lifting Platform',  cost: 150,  desc: '+5% adaptation rate' },
+            { id: 'rack',         name: 'Power Rack',        cost: 300,  desc: '+5% to all PR gains' },
+            { id: 'plates',       name: 'Calibrated Plates', cost: 500,  desc: '+5% PR gains, more consistent meets' },
+            { id: 'spec_bars',    name: 'Specialty Bars',    cost: 800,  desc: 'Sticking point penalty halved' },
+            { id: 'recovery',     name: 'Recovery Room',     cost: 1200, desc: 'Passive fatigue recovery +40%' },
+            { id: 'video',        name: 'Video Setup',       cost: 1800, desc: 'Technique floor +8 (permanent)' },
+            { id: 'strongman_pit',name: 'Strongman Pit',     cost: 2800, desc: 'Strongman event cooldown −50%' },
+            { id: 'trophy_wall',  name: 'Trophy Wall',       cost: 4500, desc: '+1.5% Knowledge per Hall of Fame entry' },
+        ];
+
+        function hasGarageRoom(id) {
+            return !!(gameState.garage && gameState.garage.rooms && gameState.garage.rooms[id]);
+        }
+        function buyGarageRoom(id) {
+            const def = GARAGE_ROOMS.find(r => r.id === id);
+            if (!def || hasGarageRoom(id)) return;
+            if (gameState.knowledge < def.cost) return;
+            gameState.knowledge -= def.cost;
+            if (!gameState.garage) gameState.garage = { rooms: {} };
+            if (!gameState.garage.rooms) gameState.garage.rooms = {};
+            gameState.garage.rooms[id] = true;
+            addJournalEntry(`Built the ${def.name} in your garage. ${def.desc}.`);
+            showNotification(`Garage: built ${def.name}`, 'success');
+            renderGarage(); updateUI(); saveGame();
+        }
+        function getGarageGainMult() {
+            let m = 1;
+            if (hasGarageRoom('rack'))   m *= 1.05;
+            if (hasGarageRoom('plates')) m *= 1.05;
+            return m;
+        }
+        function getGarageAdaptMult() {
+            return hasGarageRoom('platform') ? 1.05 : 1;
+        }
+        function getGarageRecoveryMult() {
+            return hasGarageRoom('recovery') ? 1.40 : 1;
+        }
+        function getGarageTechFloor() {
+            return hasGarageRoom('video') ? 8 : 0;
+        }
+        function getGarageStickingMult() {
+            return hasGarageRoom('spec_bars') ? 0.5 : 1;
+        }
+        function getGarageTrophyMult() {
+            if (!hasGarageRoom('trophy_wall')) return 1;
+            const hof = (gameState.legacy && gameState.legacy.hallOfFame) ? gameState.legacy.hallOfFame.length : 0;
+            return 1 + 0.015 * hof;
+        }
+
+        function renderGarage() {
+            const el = document.getElementById('garageContent');
+            if (!el) return;
+            let html = `<div style="font-size:11px;color:#888;margin-bottom:8px;">Your own private gym. Built piece by piece over many cycles. Rooms persist across legacies.</div>`;
+            html += `<div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(180px,1fr));gap:6px;">`;
+            GARAGE_ROOMS.forEach(r => {
+                const owned = hasGarageRoom(r.id);
+                const afford = gameState.knowledge >= r.cost && !owned;
+                html += `<div style="background:${owned?'#0f1a0f':'#1a1a1a'};border:1px solid ${owned?'#2a6a2a':'#333'};border-radius:5px;padding:8px;">
+                    <div style="font-size:12px;font-weight:bold;color:${owned?'#8fd88f':'#ddd'};">${owned?'✓ ':''}${r.name}</div>
+                    <div style="font-size:11px;color:#888;margin:3px 0;">${r.desc}</div>
+                    ${owned
+                        ? `<div style="font-size:10px;color:#8fd88f;">BUILT</div>`
+                        : `<button class="btn btn-primary" style="padding:3px 8px;font-size:11px;width:100%;" onclick="buyGarageRoom('${r.id}')" ${afford?'':'disabled'}>${r.cost} K</button>`}
+                </div>`;
+            });
+            html += `</div>`;
+            el.innerHTML = html;
+        }
+
+        // ── Active Coaching (Apprentice) ────────────────────────────────────
+
+        const APPRENTICE_NAMES = [
+            'Mateo','Sara','Ari','Jin','Lukas','Nadia','Theo','Ines','Sven','Mira','Karim','Yuki'
+        ];
+
+        function spawnApprentice(focus) {
+            if (gameState.apprentice) return;
+            const name = APPRENTICE_NAMES[Math.floor(Math.random() * APPRENTICE_NAMES.length)];
+            gameState.apprentice = {
+                name, focus: focus || 'balanced',
+                squat: 60, bench: 40, deadlift: 80,
+                technique: 50, fame: 0,
+                since: Date.now(),
+            };
+            gameState.apprenticeLastTick = Date.now();
+            addJournalEntry(`Took on a new apprentice — ${name}. Focus: ${focus || 'balanced'}.`);
+            showNotification(`New apprentice — ${name}`, 'pr');
+            renderApprentice(); updateUI(); saveGame();
+        }
+        function dismissApprentice() {
+            if (!gameState.apprentice) return;
+            const name = gameState.apprentice.name;
+            gameState.apprentice = null;
+            addJournalEntry(`Sent ${name} on. They'll find another coach.`);
+            renderApprentice(); updateUI(); saveGame();
+        }
+        function setApprenticeFocus(focus) {
+            if (!gameState.apprentice) return;
+            gameState.apprentice.focus = focus;
+            renderApprentice();
+        }
+        function tickApprentice(delta) {
+            if (!gameState.apprentice) return;
+            const a = gameState.apprentice;
+            // Coaching skill: tied to player technique and legacy tier.
+            const coachSkill = 0.5 + (gameState.technique || 50) / 200 + ((gameState.legacy && gameState.legacy.legacyTier) || 0) * 0.10;
+            // Apprentice grows ~5-15 kg per minute total, distributed by focus.
+            const baseRate = 0.10 * coachSkill; // kg/sec total
+            const dist = FOCUS_WEIGHTS[a.focus] || FOCUS_WEIGHTS.balanced;
+            const sum = dist[0] + dist[1] + dist[2];
+            a.squat    += baseRate * delta * (dist[0] / sum);
+            a.bench    += baseRate * delta * (dist[1] / sum);
+            a.deadlift += baseRate * delta * (dist[2] / sum);
+            a.technique = Math.min(100, a.technique + delta * 0.02);
+
+            // Passive Knowledge for the player while coaching.
+            gameState.knowledge += (0.05 + ((gameState.legacy && gameState.legacy.legacyTier) || 0) * 0.02) / 60 * delta;
+
+            const total = a.squat + a.bench + a.deadlift;
+            // Retirement when apprentice hits 400 kg.
+            if (total >= 400 && !a.retiring) {
+                a.retiring = true;
+                const reward = 500 * (1 + 0.5 * (gameState.apprenticeRetired || 0));
+                gameState.knowledge += reward;
+                gameState.apprenticeRetired = (gameState.apprenticeRetired || 0) + 1;
+                addJournalEntry(`${a.name} hit a 400 kg total and turned pro. You take a long breath. +${Math.floor(reward)} Knowledge.`);
+                showNotification(`${a.name} retired from your gym — +${Math.floor(reward)} Knowledge`, 'pr');
+                gameState.apprentice = null;
+                saveGame();
+            }
+        }
+        function renderApprentice() {
+            const el = document.getElementById('apprenticeContent');
+            if (!el) return;
+            const a = gameState.apprentice;
+            if (!a) {
+                el.innerHTML = `<div style="font-size:12px;color:#888;margin-bottom:6px;">No apprentice. Take one on to grow them while you train. They generate passive Knowledge.</div>
+                <div style="display:grid;grid-template-columns:repeat(2,1fr);gap:5px;">
+                    <button class="btn btn-primary" style="padding:5px;font-size:11px;" onclick="spawnApprentice('balanced')">Take Apprentice (Balanced)</button>
+                    <button class="btn btn-primary" style="padding:5px;font-size:11px;" onclick="spawnApprentice('squat')">Take Apprentice (Squat focus)</button>
+                    <button class="btn btn-primary" style="padding:5px;font-size:11px;" onclick="spawnApprentice('bench')">Take Apprentice (Bench focus)</button>
+                    <button class="btn btn-primary" style="padding:5px;font-size:11px;" onclick="spawnApprentice('deadlift')">Take Apprentice (Deadlift focus)</button>
+                </div>
+                ${(gameState.apprenticeRetired||0) > 0 ? `<div style="font-size:11px;color:#8fd88f;margin-top:6px;">Coached to retirement: ${gameState.apprenticeRetired}</div>` : ''}`;
+                return;
+            }
+            const total = Math.floor(a.squat + a.bench + a.deadlift);
+            el.innerHTML = `<div style="background:#1a1a2a;border:1px solid #334;border-radius:6px;padding:10px;">
+                <div style="display:flex;justify-content:space-between;align-items:baseline;">
+                    <strong style="color:#ddd;font-size:13px;">${a.name}</strong>
+                    <span style="font-size:11px;color:#888;">Focus: ${a.focus}</span>
+                </div>
+                <div style="display:grid;grid-template-columns:repeat(3,1fr);gap:5px;margin:6px 0;font-size:11px;">
+                    <div>SQ: <strong style="color:#2196F3;">${Math.floor(a.squat)}</strong></div>
+                    <div>BP: <strong style="color:#4CAF50;">${Math.floor(a.bench)}</strong></div>
+                    <div>DL: <strong style="color:#FF5722;">${Math.floor(a.deadlift)}</strong></div>
+                </div>
+                <div style="font-size:11px;color:#aaa;margin-bottom:6px;">Total: <strong style="color:#ddd;">${total}</strong> / 400 kg to graduate</div>
+                <div style="background:#0a0a14;border-radius:3px;height:6px;margin:4px 0 8px;overflow:hidden;">
+                    <div style="background:linear-gradient(90deg,#9C27B0,#E040FB);height:100%;width:${Math.min(100,total/400*100)}%;"></div>
+                </div>
+                <div style="display:grid;grid-template-columns:repeat(4,1fr);gap:3px;margin-bottom:4px;">
+                    ${['balanced','squat','bench','deadlift'].map(f =>
+                        `<button class="btn ${a.focus===f?'btn-success':'btn-primary'}" style="padding:3px;font-size:10px;" onclick="setApprenticeFocus('${f}')">${f}</button>`
+                    ).join('')}
+                </div>
+                <button class="btn btn-warning" style="padding:3px 8px;font-size:11px;width:100%;" onclick="dismissApprentice()">Dismiss</button>
+            </div>`;
         }
 
         const FOCUS_WEIGHTS = {
@@ -5585,7 +6402,10 @@
             const checklistBonus = getChecklistBonus();
             const mom            = momentumBonus  || 0;
             const extra          = extraPenalty   || 0;
-            return Math.max(0, Math.min(1, base + techBonus - fatiguePenal + compEdge + checklistBonus + mom - extra));
+            // Mind Tree platform talents
+            const coolBonus      = hasMindTalent('cool_pressure') ? 0.05 : 0;
+            const nervesBonus    = hasMindTalent('nerves') && ratio > 0.95 ? 0.10 : 0; // halves bombout (approx)
+            return Math.max(0, Math.min(1, base + techBonus - fatiguePenal + compEdge + checklistBonus + mom - extra + coolBonus + nervesBonus));
         }
 
         function momentumLabel(m) {
@@ -5874,7 +6694,7 @@
             if (compTotal > gameState.compBests.total) gameState.compBests.total = compTotal;
 
             const tier = getCurrentTier();
-            const knowledgeGain = dnf ? 0 : Math.max(10, Math.floor(compTotal / 12 * tier.knowledgeMult * getEndgameCompKnowledgeMult() * (1 + ((gameState.legacy && gameState.legacy.coachingBonusPct) || 0) / 100)));
+            const knowledgeGain = dnf ? 0 : Math.max(10, Math.floor(compTotal / 12 * tier.knowledgeMult * getEndgameCompKnowledgeMult() * getMindCompKnowledgeMult() * getFederationBody().compK * (1 + ((gameState.legacy && gameState.legacy.coachingBonusPct) || 0) / 100)));
             if (knowledgeGain) gameState.knowledge += knowledgeGain;
             gameState.competitionsEntered = (gameState.competitionsEntered || 0) + 1;
             // Track perfect meets (9/9)
@@ -5882,7 +6702,7 @@
                 const perfect = ['squat','bench','deadlift'].every(l => compData.lifts[l].results.every(r => r === true));
                 if (perfect) gameState.perfectMeets = (gameState.perfectMeets || 0) + 1;
             }
-            gameState.competitionCooldown = dnf ? 900 : 1800;
+            gameState.competitionCooldown = (dnf ? 900 : 1800) * (hasMindTalent('quick_recovery') ? 0.75 : 1);
             gameState.motivation = Math.min(100, gameState.motivation + (dnf ? 5 : 30));
             gameState.peaking = 0;
             updateRecords();
@@ -6085,6 +6905,24 @@
         if (gameState.legacy.legacyTier === undefined)        gameState.legacy.legacyTier = 0;
         if (gameState.legacy.coachingBonusPct === undefined)  gameState.legacy.coachingBonusPct = 0;
         if (!Array.isArray(gameState.legacy.hallOfFame))      gameState.legacy.hallOfFame = [];
+
+        // Second-wave back-compat
+        if (gameState.mindPointsSpent === undefined) gameState.mindPointsSpent = 0;
+        if (!gameState.mindTree)                     gameState.mindTree = {};
+        if (gameState.dailyChallenge === undefined)  gameState.dailyChallenge = null;
+        if (!gameState.liftVariants)                 gameState.liftVariants = { squat: 'high_bar', bench: 'paused', deadlift: 'conventional' };
+        if (gameState.sponsor === undefined)         gameState.sponsor = null;
+        if (!Array.isArray(gameState.sponsorOffers)) gameState.sponsorOffers = [];
+        if (gameState.lastSponsorCheck === undefined) gameState.lastSponsorCheck = 0;
+        if (gameState.strongmanCooldown === undefined) gameState.strongmanCooldown = 0;
+        if (gameState.strongmanWins === undefined)    gameState.strongmanWins = 0;
+        if (gameState.strongmanCurrent === undefined) gameState.strongmanCurrent = null;
+        if (!gameState.federationBody)               gameState.federationBody = 'ipf';
+        if (!gameState.garage || typeof gameState.garage !== 'object') gameState.garage = { rooms: {} };
+        if (!gameState.garage.rooms)                 gameState.garage.rooms = {};
+        if (gameState.apprentice === undefined)      gameState.apprentice = null;
+        if (gameState.apprenticeRetired === undefined) gameState.apprenticeRetired = 0;
+        if (gameState.apprenticeLastTick === undefined) gameState.apprenticeLastTick = 0;
 
         // Initialise records from current save
         updateRecords();
