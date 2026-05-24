@@ -1765,7 +1765,7 @@
                     <button onclick="document.getElementById('importModal').classList.add('active')" style="padding: 4px 10px; font-size: 11px; background: #37474F; color: white; border: none; border-radius: 3px; cursor: pointer;">📥 Import Save</button>
                 </div>
                 <div id="debugInfo" style="font-family: monospace; font-size: 10px; margin-top: 6px;">Ready</div>
-                <div style="font-size: 10px; color: #555; margin-top: 4px;">Last patch: <span style="color:#666;">2026-05-24 21:53</span></div>
+                <div style="font-size: 10px; color: #555; margin-top: 4px;">Last patch: <span style="color:#666;">2026-05-24 22:06</span></div>
             </div>
         </div>
 
@@ -6159,10 +6159,11 @@
             const pct = gameState[lift] / wr[lift];
             if (pct < 0.85) { showNotification('Need to reach 85%+ of WR for this lift first', 'danger'); return; }
             if ((gameState.wrAttempts || {})[lift]) { showNotification('Already attempted this lift this cycle', 'warning'); return; }
-            if (gameState.adaptation < getAdaptationCost()) { showNotification('Not enough adaptation for a record attempt', 'warning'); return; }
 
-            gameState.adaptation = 0;
-            gameState.fatigue = Math.min(1000, gameState.fatigue + 300);
+            // No adaptation prerequisite — the once-per-cycle cap + fatigue cost
+            // already make WR attempts weighty, and gating on a full adaptation
+            // bar made auto-convert mutually exclusive with WR attempts.
+            gameState.fatigue = Math.min(1000, gameState.fatigue + 400);
             if (!gameState.wrAttempts) gameState.wrAttempts = { squat: false, bench: false, deadlift: false };
             gameState.wrAttempts[lift] = true;
             if (!gameState.legacy.wrAttempts) gameState.legacy.wrAttempts = {};
