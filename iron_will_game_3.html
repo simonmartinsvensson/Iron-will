@@ -689,7 +689,6 @@
 
         .btn {
             flex: 1;
-            min-width: 150px;
             padding: 15px 20px;
             font-size: 14px;
             font-weight: bold;
@@ -700,7 +699,11 @@
             cursor: pointer;
             transition: all 0.2s ease;
             font-family: inherit;
+            min-width: 0;          /* allow buttons in narrow panels to shrink */
+            max-width: 100%;       /* never overflow parent */
         }
+        /* Preserve original 150px min-width only for the main button-group row */
+        .button-group > .btn { min-width: 150px; }
 
         .btn:hover:not(:disabled) {
             transform: translateY(-2px);
@@ -1765,7 +1768,7 @@
                     <button onclick="document.getElementById('importModal').classList.add('active')" style="padding: 4px 10px; font-size: 11px; background: #37474F; color: white; border: none; border-radius: 3px; cursor: pointer;">📥 Import Save</button>
                 </div>
                 <div id="debugInfo" style="font-family: monospace; font-size: 10px; margin-top: 6px;">Ready</div>
-                <div style="font-size: 10px; color: #555; margin-top: 4px;">Last patch: <span style="color:#666;">2026-05-24 22:06</span></div>
+                <div style="font-size: 10px; color: #555; margin-top: 4px;">Last patch: <span style="color:#666;">2026-05-24 22:31</span></div>
             </div>
         </div>
 
