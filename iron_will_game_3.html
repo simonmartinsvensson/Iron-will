@@ -1768,7 +1768,7 @@
                     <button onclick="document.getElementById('importModal').classList.add('active')" style="padding: 4px 10px; font-size: 11px; background: #37474F; color: white; border: none; border-radius: 3px; cursor: pointer;">📥 Import Save</button>
                 </div>
                 <div id="debugInfo" style="font-family: monospace; font-size: 10px; margin-top: 6px;">Ready</div>
-                <div style="font-size: 10px; color: #555; margin-top: 4px;">Last patch: <span style="color:#666;">2026-05-24 22:31</span></div>
+                <div style="font-size: 10px; color: #555; margin-top: 4px;">Last patch: <span style="color:#666;">2026-05-24 22:41</span></div>
             </div>
         </div>
 
@@ -1884,8 +1884,8 @@
             </div>
 
             <!-- Lift Variants -->
-            <div class="partner-section" id="variantsSection">
-                <div class="section-title">Lift Style — pick a stance for each lift. Lasts until next prestige.</div>
+            <div class="partner-section" id="variantsSection" style="display:none;">
+                <div class="section-title">Lift Style — pick a stance for each lift. Change anytime; choices persist across cycles.</div>
                 <div id="variantsContent"></div>
             </div>
 
@@ -1994,13 +1994,13 @@
             </div>
 
             <!-- Daily Challenge -->
-            <div class="log-section" id="dailySection">
+            <div class="log-section" id="dailySection" style="display:none;">
                 <div class="section-title">Daily Challenge — resets every UTC day</div>
                 <div id="dailyContent"></div>
             </div>
 
             <!-- Mind Tree -->
-            <div class="log-section" id="mindTreeSection">
+            <div class="log-section" id="mindTreeSection" style="display:none;">
                 <div class="section-title">Mind Tree — spend achievement points on permanent talents</div>
                 <div id="mindTreeContent"></div>
             </div>
@@ -3125,9 +3125,11 @@
                 gameState.competitionCooldown = Math.max(0, gameState.competitionCooldown - delta);
             }
 
-            // Auto-convert (one PR per tick, uses normal notification/animation)
+            // Auto-convert (silent — full popup + screen shake every PR is too spammy
+            // when adaptation refills every few seconds late game). Lift numbers,
+            // adaptation bar, and the PR Log still update visibly.
             if (gameState.autoConvert && gameState.adaptation >= getAdaptationCost()) {
-                convertAdaptation();
+                convertAdaptation(true);
             }
             
             // Warnings with flavor (throttled to once per 15 seconds)
@@ -3228,9 +3230,15 @@
             if (critical) showNotification(`CRITICAL — ${selectedLift} ${Math.floor(gameState[selectedLift])}kg (+${gain.toFixed(1)})`, 'pr');
 
             // Benefits
-            gameState.motivation = Math.min(100, gameState.motivation + 20);
+            gameState.motivation = Math.min(100, Math.min(sponsorMotCap(), gameState.motivation + 20));
             gameState.prCount++;
             gameState.lastPR = Date.now();
+
+            // Records + PR log run for ALL conversions, including silent ones.
+            // Without this, auto-converted PRs were invisible to the Hall of Fame
+            // best-totals and the Recent PRs panel.
+            updateRecords();
+            addPRToLog(selectedLift, gameState[selectedLift], gain, critical);
 
             if (silent) return;
 
@@ -3259,12 +3267,6 @@
             // Journal entries at milestones
             if (gameState.prCount === 1) addJournalEntry("Day 1. The empty bar finally moved the way I wanted it to. Something feels right about this place.");
             else if (gameState.prCount % 50 === 0) addJournalEntry(JOURNAL_PR_POOL[Math.floor(Math.random() * JOURNAL_PR_POOL.length)]);
-
-            // Records
-            updateRecords();
-
-            // Log PR
-            addPRToLog(selectedLift, gameState[selectedLift], gain);
 
             updateUI();
         }
@@ -4907,8 +4909,17 @@
             gameState.equipment = { belt: false, kneeSleves: false, wristWraps: false, deadliftSuit: false, chalk: false, preWorkout: false };
             gameState.gymTier = 0;
             gameState.trainingPartner = 0;
+            // Cycle-state items that should be fresh in a new life:
+            gameState.sponsor = null;
+            gameState.sponsorOffers = [];
+            gameState.strongmanCurrent = null;
+            gameState.strongmanCooldown = 0;
+            gameState.federationBody = 'ipf';
+            gameState.liftVariants = { squat: 'high_bar', bench: 'paused', deadlift: 'conventional' };
+            gameState.coachDropinsFired = {};
             // PERSIST: masteryRanks, pantheonRivals, pantheonPerks, mythicRecords, records,
-            // perfectMeets, competitionsEntered, achievements, legacy.
+            // perfectMeets, competitionsEntered, achievements, legacy, mindTree,
+            // strongmanWins, apprenticeRetired, tournament, garage, personalMethod.
 
             closeCoachingModal();
             addJournalEntry(`Retired to coach. The first new lifter walks in tomorrow. Legacy tier: ${gameState.legacy.legacyTier}.`);
@@ -5346,6 +5357,7 @@
             const def = pool[Math.floor(Math.random() * pool.length)];
             gameState.sponsorOffers.push({ id: def.id, since: Date.now() });
             showNotification(`Sponsor offer — ${def.name}`, 'info');
+            addJournalEntry(`A rep from ${def.name} reaches out. ${def.restrictionDesc}. Offer in the Gear tab.`);
         }
         function acceptSponsor(id) {
             const def = SPONSOR_DEFS.find(d => d.id === id);
@@ -5429,6 +5441,7 @@
             const def = STRONGMAN_EVENTS[Math.floor(Math.random() * STRONGMAN_EVENTS.length)];
             gameState.strongmanCurrent = { eventId: def.id, expires: Date.now() + 5 * 60 * 1000 };
             showNotification(`Strongman event today — ${def.name}!`, 'info');
+            addJournalEntry(`A strongman event popped up: ${def.name}. 5 minutes to take a shot from the Gear tab.`);
         }
         function attemptStrongman() {
             const cur = gameState.strongmanCurrent;
@@ -6417,23 +6430,32 @@
         function renderEquipment() {
             const grid = document.getElementById('equipmentGrid');
             if (!grid) return;
-            const stateKey = JSON.stringify({ k: gameState.knowledge, e: gameState.equipment });
+            // Include sponsor id in state key so blocked-equipment styling updates immediately.
+            const sponsorKey = gameState.sponsor ? gameState.sponsor.id : 'none';
+            const stateKey = JSON.stringify({ k: gameState.knowledge, e: gameState.equipment, s: sponsorKey });
             if (grid.dataset.stateKey === stateKey) return;
             grid.dataset.stateKey = stateKey;
 
             grid.innerHTML = '';
             const eq = gameState.equipment || {};
+            // Map equipment id → sponsor restriction action it conflicts with
+            const restrictionMap = { belt: 'belt', chalk: 'chalk' };
             EQUIPMENT_DEFS.forEach(item => {
                 const owned = eq[item.id];
                 const affordable = !owned && gameState.knowledge >= item.cost;
+                const blockAction = restrictionMap[item.id];
+                const muted = owned && blockAction && sponsorBlocks(blockAction);
                 const div = document.createElement('div');
                 div.className = 'equipment-item' + (owned ? ' owned' : '') + (affordable ? ' affordable' : '');
+                if (muted) div.style.opacity = '0.45';
                 div.innerHTML = `
                     <div class="equipment-icon">${item.icon}</div>
                     <div class="equipment-name">${item.name}</div>
                     <div class="equipment-desc">${item.desc}</div>
                     ${owned
-                        ? '<div class="equipment-owned">✓ Owned</div>'
+                        ? (muted
+                            ? '<div class="equipment-owned" style="color:#f88;">⊘ Sponsor-blocked</div>'
+                            : '<div class="equipment-owned">✓ Owned</div>')
                         : `<div class="equipment-cost">${item.cost} Knowledge</div>`}
                 `;
                 if (affordable) div.addEventListener('click', () => buyEquipment(item.id, item.cost));
@@ -6496,9 +6518,9 @@
         }
 
         // ── PR history log ───────────────────────────────────────────────────
-        function addPRToLog(lift, weight, gain) {
+        function addPRToLog(lift, weight, gain, critical) {
             if (!gameState.prHistory) gameState.prHistory = [];
-            gameState.prHistory.push({ lift, weight: Math.floor(weight), gain: gain.toFixed(1), time: Date.now() });
+            gameState.prHistory.push({ lift, weight: Math.floor(weight), gain: gain.toFixed(1), time: Date.now(), critical: !!critical });
             if (gameState.prHistory.length > 50) gameState.prHistory.shift();
             renderPRLog();
         }
@@ -6509,10 +6531,11 @@
             const liftColors = { squat: '#2196F3', bench: '#4CAF50', deadlift: '#FF5722' };
             log.innerHTML = [...gameState.prHistory].reverse().slice(0, 20).map(entry => {
                 const t = new Date(entry.time).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
-                return `<div class="pr-log-entry">
-                    <span class="pr-log-lift" style="color:${liftColors[entry.lift]}">${entry.lift.charAt(0).toUpperCase()+entry.lift.slice(1)}</span>
+                const critMark = entry.critical ? `<span title="Critical PR (×2 gain)" style="color:#FFD700;font-weight:bold;margin-right:4px;">⚡</span>` : '';
+                return `<div class="pr-log-entry"${entry.critical ? ' style="background:#1a1605;"' : ''}>
+                    <span class="pr-log-lift" style="color:${liftColors[entry.lift]}">${critMark}${entry.lift.charAt(0).toUpperCase()+entry.lift.slice(1)}</span>
                     <span class="pr-log-weight">${entry.weight}kg</span>
-                    <span class="pr-log-gain">+${entry.gain}kg</span>
+                    <span class="pr-log-gain"${entry.critical ? ' style="color:#FFD700;"' : ''}>+${entry.gain}kg</span>
                     <span class="pr-log-time">${t}</span>
                 </div>`;
             }).join('');
