@@ -1765,7 +1765,7 @@
                     <button onclick="document.getElementById('importModal').classList.add('active')" style="padding: 4px 10px; font-size: 11px; background: #37474F; color: white; border: none; border-radius: 3px; cursor: pointer;">📥 Import Save</button>
                 </div>
                 <div id="debugInfo" style="font-family: monospace; font-size: 10px; margin-top: 6px;">Ready</div>
-                <div style="font-size: 10px; color: #555; margin-top: 4px;">Last patch: <span style="color:#666;">2026-05-24 20:32</span></div>
+                <div style="font-size: 10px; color: #555; margin-top: 4px;">Last patch: <span style="color:#666;">2026-05-24 20:48</span></div>
             </div>
         </div>
 
@@ -2463,7 +2463,8 @@
             const weightMult       = getWeightMultipliers().fatigue;
             const nutritionFatMult = gameState.nutrition === 'surplus' ? 1.12 : gameState.nutrition === 'deficit' ? 0.88 : 1;
             const peakMult         = (gameState.peaking > 0) ? 0.25 : 1;
-            return baseRate * intensityMult * resilienceMult * weightMult * nutritionFatMult * peakMult;
+            const glassMult = hasPerk('glass_cannon') ? 1.20 : 1;
+            return baseRate * intensityMult * resilienceMult * weightMult * nutritionFatMult * peakMult * glassMult;
         }
 
         // Get adaptation cost for next PR — WR-relative so weight class doesn't affect pacing,
@@ -3083,9 +3084,10 @@
             // Endgame: mastery, Iron Trinity, Pantheon perks
             gainMult *= getEndgameGainMult(selectedLift);
 
-            // Cynic's Edge — at high motivation, PRs may roll critical (×2 gain).
+            // Critical PR — combines Cynic's Edge (high motivation) and Gambler's Iron (flat chance).
             let critical = false;
-            if (hasPantheonPerk('cynics_edge') && (gameState.motivation || 0) >= 90 && Math.random() < 0.20) {
+            const critChance = getCriticalPrChance();
+            if (critChance > 0 && Math.random() < critChance) {
                 critical = true;
                 gainMult *= 2;
             }
@@ -3673,6 +3675,7 @@
         // ── Perks ────────────────────────────────────────────────────────────
 
         const PERK_POOL = [
+            // ── Core (always available) ───────────────────────────────────
             { id: 'squat_spec',  name: 'Squat Specialist',    desc: '+30% squat PR gains' },
             { id: 'bench_spec',  name: 'Bench Specialist',    desc: '+30% bench PR gains' },
             { id: 'dl_spec',     name: 'Deadlift Specialist', desc: '+30% deadlift PR gains' },
@@ -3684,6 +3687,30 @@
             { id: 'comp_edge',   name: 'Competition Edge',    desc: '+12% success rate in meets (stacks)' },
             { id: 'supercomp',   name: 'Supercompensation',   desc: '+15% adaptation rate' },
             { id: 'veteran',     name: 'Veteran',             desc: 'Start each cycle at 70 technique' },
+
+            // ── Risk / reward (always available) ──────────────────────────
+            { id: 'glass_cannon', name: 'Glass Cannon',        desc: '+30% PR gains · +20% fatigue rate' },
+            { id: 'iron_heart',   name: 'Iron Heart',          desc: '+40% gains when motivation ≤ 30 — anger fuels you' },
+            { id: 'last_stand',   name: 'Last Stand',          desc: '+50% gains when fatigue ≥ 800 — the late grind' },
+            { id: 'gamblers_iron',name: "Gambler's Iron",      desc: 'Every PR has a 15% chance to be critical (×2 gain)' },
+
+            // ── Permanent flavor (always available, stack) ────────────────
+            { id: 'cycle_stacker', name: 'Cycle Stacker',       desc: '+1% to all PR gains per completed prestige cycle (stacks)' },
+            { id: 'lifetime_iron', name: 'Lifetime Iron',       desc: '+1% to all gains per 200 lifetime PRs (stacks)' },
+
+            // ── Endgame-gated (only offered once the relevant system is in play; stack) ─
+            { id: 'pantheon_hunter', name: 'Pantheon Hunter',   desc: 'Active Pantheon rivals grow 25% slower (stacks)',
+              available: gs => gs.federation && (gs.federation.rank === 'world' || gs.federation.rank === 'pantheon') },
+            { id: 'mythic_amplifier', name: 'Mythic Amplifier', desc: 'Mythic-record Knowledge bonus +0.5% per kg, doubled (stacks)',
+              available: gs => (gs.mythicRecords && (gs.mythicRecords.squat + gs.mythicRecords.bench + gs.mythicRecords.deadlift) > 0) || (gs.unlockedFeatures && gs.unlockedFeatures.mythicRecords) },
+            { id: 'apex_predator', name: 'Apex Predator',       desc: '+20% to all PR gains while at Pantheon division',
+              available: gs => (gs.unlockedFeatures && gs.unlockedFeatures.pantheon) || (gs.federation && gs.federation.rank === 'pantheon') },
+            { id: 'coachs_discipline', name: "Coach's Discipline", desc: 'Legacy Knowledge bonus +50% stronger',
+              available: gs => (gs.legacy && (gs.legacy.legacyTier || 0) >= 1) || (gs.unlockedFeatures && gs.unlockedFeatures.coaching) },
+            { id: 'heritage', name: 'Heritage',                  desc: '+10% Knowledge per Legacy tier (stacks)',
+              available: gs => gs.legacy && (gs.legacy.legacyTier || 0) >= 1 },
+            { id: 'iron_dynasty', name: 'Iron Dynasty',          desc: '+8% Knowledge per defeated Pantheon lifter',
+              available: gs => Array.isArray(gs.pantheonRivals) && gs.pantheonRivals.length >= 1 },
         ];
 
         function hasPerk(id) { return gameState.perks && gameState.perks.includes(id); }
@@ -3692,8 +3719,12 @@
         function showPerkSelection() {
             const pool = PERK_POOL.filter(p => {
                 // Don't offer duplicate non-stackable perks
-                const nonStack = ['squat_spec','bench_spec','dl_spec','resilience','tech_master','recovery','supercomp','veteran'];
-                return !(nonStack.includes(p.id) && hasPerk(p.id));
+                const nonStack = ['squat_spec','bench_spec','dl_spec','resilience','tech_master','recovery','supercomp','veteran',
+                                  'glass_cannon','iron_heart','last_stand','gamblers_iron','apex_predator','coachs_discipline','iron_dynasty'];
+                if (nonStack.includes(p.id) && hasPerk(p.id)) return false;
+                // Respect gating predicate, if any
+                if (typeof p.available === 'function' && !p.available(gameState)) return false;
+                return true;
             });
             // Shuffle
             for (let i = pool.length - 1; i > 0; i--) {
@@ -4372,7 +4403,11 @@
             r.timer = (r.timer || 60) - delta;
             if (r.timer <= 0) {
                 // Pantheon rivals grow steadily — they're a moving target.
-                r.total += (1 + Math.random() * 1.5);
+                let growth = 1 + Math.random() * 1.5;
+                // Pantheon Hunter — slows their growth by 25% per stack, floor 25%.
+                const hunterStacks = perkCount('pantheon_hunter');
+                if (hunterStacks > 0) growth *= Math.max(0.25, 1 - 0.25 * hunterStacks);
+                r.total += growth;
                 r.timer = 60;
             }
         }
@@ -4487,7 +4522,11 @@
 
         function getMythicKnowledgeMult() {
             // +0.5% per kg above WR (caps at +50% for 100kg of mythic across lifts).
-            return 1 + Math.min(0.5, getMythicKg() * 0.005);
+            // Mythic Amplifier perk stacks: each stack adds another +0.5%/kg, same cap per stack.
+            const ampStacks = perkCount('mythic_amplifier');
+            const perKg = 0.005 * (1 + ampStacks);
+            const cap   = 0.5   * (1 + ampStacks);
+            return 1 + Math.min(cap, getMythicKg() * perKg);
         }
 
         // ── Coaching Legacy (meta-prestige) ──────────────────────────────────
@@ -4627,15 +4666,47 @@
                 const map = { squat: 'kneeSleves', bench: 'wristWraps', deadlift: 'deadliftSuit' };
                 if (gameState.equipment[map[lift]]) m *= 1.15;
             }
+            // ── New prestige perks ────────────────────────────────────────
+            if (hasPerk('glass_cannon')) m *= 1.30;
+            if (hasPerk('iron_heart') && (gameState.motivation || 0) <= 30) m *= 1.40;
+            if (hasPerk('last_stand')  && (gameState.fatigue || 0) >= 800)  m *= 1.50;
+            if (hasPerk('apex_predator') && gameState.federation && gameState.federation.rank === 'pantheon') m *= 1.20;
+            const cycStacks = perkCount('cycle_stacker');
+            if (cycStacks > 0) m *= 1 + cycStacks * 0.01 * (gameState.prestigeCount || 1);
+            const lifeStacks = perkCount('lifetime_iron');
+            if (lifeStacks > 0) {
+                const lifePRs = ((gameState.legacy && gameState.legacy.allTimePRs) || 0) + (gameState.prCount || 0);
+                m *= 1 + lifeStacks * 0.01 * Math.floor(lifePRs / 200);
+            }
             return m;
+        }
+
+        // Critical PR chance from prestige and pantheon perks (returns 0..1).
+        function getCriticalPrChance() {
+            let c = 0;
+            // Cynic's Edge — at high motivation only
+            if (hasPantheonPerk('cynics_edge') && (gameState.motivation || 0) >= 90) c += 0.20;
+            // Gambler's Iron — flat 15% always
+            if (hasPerk('gamblers_iron')) c += 0.15;
+            return Math.min(0.85, c);
         }
 
         // Knowledge multiplier from endgame systems (applied wherever knowledge is earned via prestige).
         function getEndgameKnowledgeMult() {
             let m = 1;
             m *= getMythicKnowledgeMult();
-            const legacyBonus = (gameState.legacy && gameState.legacy.coachingBonusPct) || 0;
+            let legacyBonus = (gameState.legacy && gameState.legacy.coachingBonusPct) || 0;
+            if (hasPerk('coachs_discipline')) legacyBonus *= 1.5;
             m *= 1 + legacyBonus / 100;
+            // Heritage — +10% per stack per legacy tier.
+            const heritageStacks = perkCount('heritage');
+            const legacyTier = (gameState.legacy && gameState.legacy.legacyTier) || 0;
+            if (heritageStacks > 0 && legacyTier > 0) m *= 1 + 0.10 * heritageStacks * legacyTier;
+            // Iron Dynasty — +8% per defeated Pantheon lifter (non-stacking).
+            if (hasPerk('iron_dynasty')) {
+                const beaten = (gameState.pantheonRivals || []).length;
+                m *= 1 + 0.08 * beaten;
+            }
             return m;
         }
 
