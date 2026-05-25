@@ -1655,6 +1655,7 @@
             <button class="tab-btn active" data-tab="train">Train</button>
             <button class="tab-btn" data-tab="gear">Gear</button>
             <button class="tab-btn" data-tab="progress">Progress</button>
+            <button class="tab-btn" data-tab="coach" style="display:none;">Coach</button>
         </div>
 
         <!-- Train Tab -->
@@ -1801,7 +1802,7 @@
                     <button onclick="document.getElementById('importModal').classList.add('active')" style="padding: 4px 10px; font-size: 11px; background: #37474F; color: white; border: none; border-radius: 3px; cursor: pointer;">📥 Import Save</button>
                 </div>
                 <div id="debugInfo" style="font-family: monospace; font-size: 10px; margin-top: 6px;">Ready</div>
-                <div style="font-size: 10px; color: #555; margin-top: 4px;">Last patch: <span style="color:#666;">2026-05-25 08:04</span></div>
+                <div style="font-size: 10px; color: #555; margin-top: 4px;">Last patch: <span style="color:#666;">2026-05-25 10:31</span></div>
             </div>
         </div>
 
@@ -2051,6 +2052,14 @@
             </div>
 
         </div><!-- end tab-progress -->
+
+        <!-- Coach Tab — unlocked at Iron Encyclopedia -->
+        <div class="tab-panel" id="tab-coach">
+            <div class="log-section" style="border-top:none;">
+                <div class="section-title">Coach Mode — your roster, your method, their platform</div>
+                <div id="coachTabContent"></div>
+            </div>
+        </div><!-- end tab-coach -->
 
     </div><!-- end game-container -->
 
@@ -2354,6 +2363,20 @@
             apprentice: null,             // { name, age, focus, squat, bench, deadlift, technique, fame, since }
             apprenticeRetired: 0,         // count of apprentices that finished their career
             apprenticeLastTick: 0,
+
+            // ── Coach Mode (post-Iron Encyclopedia capstone) ─────────────────
+            // Full-time coach: multi-lifter roster, recruit pool, simulated meets,
+            // passive Knowledge income. Unlocked when "completionist" is earned.
+            coachMode: {
+                unlocked: false,
+                trainees: [],          // [{id, name, archetype, squat, bench, deadlift, technique, motivation, focus, fame, meetCooldown, since}]
+                recruitPool: [],       // pending recruits to pick from
+                nextRecruitTimer: 0,
+                graduated: 0,
+                meetWins: 0,
+                fame: 0,
+                maxRoster: 2,          // grows to 5 over career
+            },
         };
 
         // Load saved game
@@ -2494,6 +2517,7 @@
             // Second-wave offline: sponsor K, apprentice, strongman cooldown
             tickSponsorKnowledge(elapsed);
             tickApprentice(elapsed);
+            tickCoachMode(elapsed);
             if (gameState.strongmanCooldown > 0) {
                 gameState.strongmanCooldown = Math.max(0, gameState.strongmanCooldown - elapsed);
             }
@@ -2791,6 +2815,7 @@
                 renderGarage();
                 renderApprentice();
                 renderTournament();
+                renderCoachMode();
             }
 
             // Peaking status display
@@ -3135,6 +3160,7 @@
             tickSponsorKnowledge(delta);
             tickStrongman(delta);
             tickApprentice(delta);
+            tickCoachMode(delta);
             checkDailyChallenge();
 
             // Ambient gym chatter — fire occasionally so the gym feels alive.
@@ -3697,6 +3723,14 @@
                 unlock: 'Garage Gym unlocked — build your own gym room by room in the Gear tab. Persists across every legacy.',
             },
             {
+                id: 'coachMode_unlock',
+                check: (gs) => gs.achievements && gs.achievements.completionist === true,
+                chapter: 'The Full-Time Coach',
+                title: 'They Want You to Run Their Programs',
+                story: `A federation president visits the gym one afternoon. She doesn't bother with small talk.\n\n"You've done it all," she says. "There is nothing left for you to chase. Your name is on the plaques. Your method has its own page on the federation site."\n\nShe places a thick folder on the bench. "These are lifters who want you. Specifically. The platform isn't done with you. It's just done with you as a competitor."\n\nYou flip through the folder. Names. Bodies. Possible futures.\n\n"Run a roster," she says. "Build a stable. Become the coach that other coaches study."`,
+                unlock: 'Coach Mode unlocked — a new Coach tab appears. Recruit up to 5 trainees, run their programs, send them to compete. Every meet they win earns Knowledge and grows your coaching fame.',
+            },
+            {
                 id: 'mindTree_unlock',
                 check: (gs) => {
                     if (!gs.achievements) return false;
@@ -3778,6 +3812,8 @@
                     if (triggered) {
                         gameState.unlockedFeatures[m.id] = true;
                         storyQueue.push(m);
+                        // Side-effect hooks tied to specific milestones
+                        if (m.id === 'coachMode_unlock') unlockCoachModeOnce();
                     }
                 }
             });
@@ -3947,6 +3983,7 @@
             // Tab badges — pulse a dot on the tab when something is waiting.
             const gearTabBtn     = document.querySelector('.tab-btn[data-tab="gear"]');
             const progressTabBtn = document.querySelector('.tab-btn[data-tab="progress"]');
+            const coachTabBtn    = document.querySelector('.tab-btn[data-tab="coach"]');
             const gearPending =
                 (Array.isArray(gameState.sponsorOffers) && gameState.sponsorOffers.length > 0 && !gameState.sponsor) ||
                 !!gameState.strongmanCurrent;
@@ -3956,6 +3993,15 @@
             const progressPending = dailyClaimable || mindPointsToSpend || tournamentReady;
             if (gearTabBtn)     gearTabBtn.classList.toggle('has-badge', gearPending);
             if (progressTabBtn) progressTabBtn.classList.toggle('has-badge', progressPending);
+
+            // Coach Mode tab visibility + badge (recruits available with room on roster, or a trainee ready to compete)
+            if (coachTabBtn) {
+                const cm = gameState.coachMode || {};
+                coachTabBtn.style.display = cm.unlocked ? '' : 'none';
+                const haveRecruitsWithRoom = cm.unlocked && Array.isArray(cm.recruitPool) && cm.recruitPool.length > 0 && Array.isArray(cm.trainees) && cm.trainees.length < (cm.maxRoster || 2);
+                const traineeReadyToCompete = cm.unlocked && Array.isArray(cm.trainees) && cm.trainees.some(t => (t.squat + t.bench + t.deadlift) >= 200 && (t.meetCooldown || 0) <= 0);
+                coachTabBtn.classList.toggle('has-badge', !!(haveRecruitsWithRoom || traineeReadyToCompete));
+            }
         }
 
         // ── Perks ────────────────────────────────────────────────────────────
@@ -4611,9 +4657,15 @@
             { id: 'all_perks',      name: 'Polymath',            desc: 'Earn at least one of every Pantheon perk',       icon: '🧠', check: gs => gs.pantheonPerks && gs.pantheonPerks.length >= 5 },
             { id: 'completionist',  name: 'Iron Encyclopedia',   desc: '(hidden) Unlock every other achievement',        icon: '📕', hidden: true, check: gs => {
                 if (!gs.achievements) return false;
-                const others = ACHIEVEMENT_DEFS.filter(a => a.id !== 'completionist');
+                const others = ACHIEVEMENT_DEFS.filter(a => a.id !== 'completionist' && !['coach_first','coach_full_roster','coach_grad_3','coach_grad_10','coach_meet_25'].includes(a.id));
                 return others.every(a => gs.achievements[a.id]);
             }},
+            // ── Coach Mode achievements (post-Encyclopedia) ──────────────────
+            { id: 'coach_first',       name: 'Take a Roster',          desc: 'Recruit your first trainee in Coach Mode',  icon: '📋', check: gs => gs.coachMode && (gs.coachMode.trainees.length + gs.coachMode.graduated) >= 1 },
+            { id: 'coach_full_roster', name: 'Full Stable',            desc: 'Have 5 trainees on your roster at once',     icon: '👥', check: gs => gs.coachMode && gs.coachMode.trainees.length >= 5 },
+            { id: 'coach_grad_3',      name: 'Three to the Top',       desc: 'Graduate 3 trainees in Coach Mode',         icon: '🎓', check: gs => gs.coachMode && gs.coachMode.graduated >= 3 },
+            { id: 'coach_grad_10',     name: 'A Coaching Career',      desc: 'Graduate 10 trainees in Coach Mode',        icon: '🏫', check: gs => gs.coachMode && gs.coachMode.graduated >= 10 },
+            { id: 'coach_meet_25',     name: 'Pillar of the Sport',    desc: 'Win 25 trainee meets in Coach Mode',         icon: '🏛️', check: gs => gs.coachMode && gs.coachMode.meetWins >= 25 },
         ];
 
         // ════════════════════════════════════════════════════════════════════
@@ -5868,6 +5920,308 @@
                 </div>
                 <button class="btn btn-warning" style="padding:3px 8px;font-size:11px;width:100%;" onclick="dismissApprentice()">Dismiss</button>
             </div>`;
+        }
+
+        // ════════════════════════════════════════════════════════════════════
+        //  COACH MODE — Post-Iron Encyclopedia capstone gameplay
+        //  You step off the platform and run a roster of lifters.
+        // ════════════════════════════════════════════════════════════════════
+
+        const COACH_FIRST_NAMES = [
+            'Mateo','Sara','Ari','Jin','Lukas','Nadia','Theo','Ines','Sven','Mira',
+            'Karim','Yuki','Bea','Owen','Tana','Felix','Aisha','Diego','Hana','Noor'
+        ];
+        const COACH_LAST_NAMES  = [
+            'Castro','Berg','Okafor','Park','Eriksson','Costa','Holm','Rivas','Stein','Tao',
+            'Iqbal','Sato','Vidic','Doyle','Patel','Almasi','Lund','Chen','Demir','Walsh'
+        ];
+
+        // Recruit archetypes — different starting strengths give the player
+        // a meaningful pick when refreshing the recruit pool.
+        const TRAINEE_TEMPLATES = [
+            { archetype: 'Rookie',         bias: 'balanced', sq: 50,  bn: 40,  dl: 70,  tech: 40, flavor: 'fresh out of a college lifting club' },
+            { archetype: 'Squat Specialist', bias: 'squat',  sq: 110, bn: 50,  dl: 85,  tech: 55, flavor: 'big legs, weak press' },
+            { archetype: 'Presser',        bias: 'bench',    sq: 65,  bn: 95,  dl: 70,  tech: 60, flavor: 'a former gymnast' },
+            { archetype: 'Puller',         bias: 'deadlift', sq: 80,  bn: 55,  dl: 130, tech: 50, flavor: 'lifelong manual labor' },
+            { archetype: 'Masters Athlete',bias: 'balanced', sq: 90,  bn: 70,  dl: 110, tech: 80, flavor: 'a 40-year-old comeback story' },
+            { archetype: 'Genetic Outlier',bias: 'balanced', sq: 100, bn: 80,  dl: 120, tech: 60, flavor: 'won juniors three years in a row' },
+        ];
+
+        function generateRecruit() {
+            const tpl = TRAINEE_TEMPLATES[Math.floor(Math.random() * TRAINEE_TEMPLATES.length)];
+            const first = COACH_FIRST_NAMES[Math.floor(Math.random() * COACH_FIRST_NAMES.length)];
+            const last  = COACH_LAST_NAMES[Math.floor(Math.random() * COACH_LAST_NAMES.length)];
+            return {
+                id: 't_' + Date.now() + '_' + Math.floor(Math.random() * 1000),
+                name: `${first} ${last}`,
+                archetype: tpl.archetype, bias: tpl.bias, flavor: tpl.flavor,
+                squat: tpl.sq, bench: tpl.bn, deadlift: tpl.dl,
+                technique: tpl.tech, motivation: 90,
+                focus: tpl.bias,         // default focus matches archetype's bias
+                fame: 0, meetCooldown: 0,
+                meetsWon: 0, meetsLost: 0,
+                since: Date.now(),
+            };
+        }
+
+        function refreshCoachRecruitPool(force) {
+            const cm = gameState.coachMode;
+            if (!cm.unlocked) return;
+            if (!force && cm.recruitPool.length >= 3) return;
+            // Add up to 3 recruits in the pool
+            while (cm.recruitPool.length < 3) {
+                cm.recruitPool.push(generateRecruit());
+            }
+        }
+
+        function recruitTrainee(idx) {
+            const cm = gameState.coachMode;
+            if (!cm.unlocked) return;
+            if (cm.trainees.length >= cm.maxRoster) {
+                showNotification(`Roster is full — current cap is ${cm.maxRoster}`, 'warning');
+                return;
+            }
+            const recruit = cm.recruitPool[idx];
+            if (!recruit) return;
+            cm.recruitPool.splice(idx, 1);
+            cm.trainees.push(recruit);
+            addJournalEntry(`Signed ${recruit.name} (${recruit.archetype}) to the roster. ${recruit.flavor}.`);
+            showNotification(`Signed ${recruit.name}`, 'pr');
+            checkAchievements();
+            renderCoachMode(); updateUI(); saveGame();
+        }
+
+        function dismissTraineeById(id) {
+            const cm = gameState.coachMode;
+            const t = cm.trainees.find(x => x.id === id);
+            if (!t) return;
+            cm.trainees = cm.trainees.filter(x => x.id !== id);
+            addJournalEntry(`Released ${t.name} from the roster. They'll catch on somewhere.`);
+            renderCoachMode(); updateUI(); saveGame();
+        }
+
+        function setTraineeFocus(id, focus) {
+            const cm = gameState.coachMode;
+            const t = cm.trainees.find(x => x.id === id);
+            if (!t) return;
+            t.focus = focus;
+            renderCoachMode();
+        }
+
+        function sendTraineeToMeet(id) {
+            const cm = gameState.coachMode;
+            const t = cm.trainees.find(x => x.id === id);
+            if (!t) return;
+            const total = t.squat + t.bench + t.deadlift;
+            if (total < 200) {
+                showNotification(`${t.name} isn't ready (need 200 kg total)`, 'warning');
+                return;
+            }
+            if (t.meetCooldown > 0) {
+                const m = Math.floor(t.meetCooldown / 60), s = Math.floor(t.meetCooldown % 60);
+                showNotification(`${t.name} is recovering — ${m}:${s.toString().padStart(2,'0')} remaining`, 'warning');
+                return;
+            }
+            // Simulated success — base chance from technique + total relative to roster average
+            const baseChance = Math.min(0.92, 0.35 + (t.technique / 100) * 0.35 + (total / 800) * 0.2);
+            const win = Math.random() < baseChance;
+            t.meetCooldown = 600; // 10 minutes recovery
+            if (win) {
+                t.meetsWon = (t.meetsWon || 0) + 1;
+                cm.meetWins++;
+                t.fame += 10;
+                cm.fame += 5;
+                const kBonus = 40 + Math.floor(total / 8);
+                gameState.knowledge += kBonus;
+                t.motivation = Math.min(100, t.motivation + 10);
+                addJournalEntry(`${t.name} won a meet — ${total} kg total. Your name on the wins board too. +${kBonus} K.`);
+                showNotification(`${t.name} won the meet · +${kBonus} K · +5 coach fame`, 'pr');
+            } else {
+                t.meetsLost = (t.meetsLost || 0) + 1;
+                t.fame = Math.max(0, t.fame - 3);
+                t.motivation = Math.max(40, t.motivation - 15);
+                addJournalEntry(`${t.name} bombed the meet. You'll fix what you saw.`);
+                showNotification(`${t.name} lost the meet`, 'warning');
+            }
+            checkAchievements();
+            renderCoachMode(); updateUI(); saveGame();
+        }
+
+        function graduateTrainee(t) {
+            const cm = gameState.coachMode;
+            cm.trainees = cm.trainees.filter(x => x.id !== t.id);
+            cm.graduated++;
+            cm.fame += 25;
+            // Roster cap grows slowly: 2 → 3 (1st), → 4 (3rd), → 5 (6th).
+            if (cm.graduated >= 1 && cm.maxRoster < 3) cm.maxRoster = 3;
+            if (cm.graduated >= 3 && cm.maxRoster < 4) cm.maxRoster = 4;
+            if (cm.graduated >= 6 && cm.maxRoster < 5) cm.maxRoster = 5;
+            const reward = 1000 + 300 * cm.graduated;
+            gameState.knowledge += reward;
+            addJournalEntry(`${t.name} graduated to the pro tier — 500 kg total. They'll thank you in their first interview. +${reward} K.`);
+            showNotification(`${t.name} graduated · +${reward} Knowledge · roster cap ${cm.maxRoster}`, 'pr', 6000);
+            checkAchievements();
+        }
+
+        function tickCoachMode(delta) {
+            const cm = gameState.coachMode;
+            if (!cm.unlocked) return;
+            // Coach skill: scales with player's mastery, legacy, prestige count.
+            const coachSkill = 0.6
+                + ((gameState.legacy && gameState.legacy.legacyTier) || 0) * 0.10
+                + (gameState.masteryRanks ? (gameState.masteryRanks.squat + gameState.masteryRanks.bench + gameState.masteryRanks.deadlift) * 0.02 : 0)
+                + Math.min(0.5, (gameState.prestigeCount || 1) * 0.02);
+            // Each trainee grows by ~0.06 kg/sec total, scaled by coach skill & their motivation/technique.
+            cm.trainees.forEach(t => {
+                const dist = FOCUS_WEIGHTS[t.focus] || FOCUS_WEIGHTS.balanced;
+                const sum = dist[0] + dist[1] + dist[2];
+                const motivationMult = 0.6 + (t.motivation / 100) * 0.6; // 0.6–1.2×
+                const technMult      = 0.7 + (t.technique  / 100) * 0.5; // 0.7–1.2×
+                const rate = 0.06 * coachSkill * motivationMult * technMult;
+                t.squat    += rate * delta * (dist[0] / sum);
+                t.bench    += rate * delta * (dist[1] / sum);
+                t.deadlift += rate * delta * (dist[2] / sum);
+                t.technique = Math.min(100, t.technique + delta * 0.015 * coachSkill);
+                if (t.meetCooldown > 0) t.meetCooldown = Math.max(0, t.meetCooldown - delta);
+                // Slow motivation drift toward 70 (no PR clicks here)
+                if (t.motivation > 70) t.motivation = Math.max(70, t.motivation - 0.02 * delta);
+                else if (t.motivation < 70) t.motivation = Math.min(70, t.motivation + 0.02 * delta);
+                // Passive Knowledge income for the coach
+                gameState.knowledge += (0.03 + cm.graduated * 0.01) / 60 * delta;
+                // Auto-graduate at 500 kg total
+                if (t.squat + t.bench + t.deadlift >= 500) graduateTrainee(t);
+            });
+            // Coach fame ticks up slowly while you have anyone training
+            if (cm.trainees.length > 0) cm.fame += 0.001 * delta * cm.trainees.length;
+            // Refresh recruit pool periodically
+            cm.nextRecruitTimer -= delta;
+            if (cm.nextRecruitTimer <= 0) {
+                refreshCoachRecruitPool();
+                cm.nextRecruitTimer = 300; // 5 min
+            }
+        }
+
+        // Migrate existing single apprentice into Coach Mode roster on unlock.
+        function migrateApprenticeToCoachMode() {
+            if (!gameState.apprentice) return;
+            const a = gameState.apprentice;
+            const cm = gameState.coachMode;
+            cm.trainees.push({
+                id: 't_migrated_' + Date.now(),
+                name: a.name + ' (your last apprentice)',
+                archetype: 'Apprentice', bias: a.focus || 'balanced', flavor: 'the lifter you were mentoring when the coaching offer came in',
+                squat: a.squat, bench: a.bench, deadlift: a.deadlift,
+                technique: a.technique || 50, motivation: 80,
+                focus: a.focus || 'balanced',
+                fame: 0, meetCooldown: 0,
+                meetsWon: 0, meetsLost: 0,
+                since: a.since || Date.now(),
+            });
+            gameState.apprentice = null;
+        }
+
+        function unlockCoachModeOnce() {
+            const cm = gameState.coachMode;
+            if (cm.unlocked) return;
+            cm.unlocked = true;
+            migrateApprenticeToCoachMode();
+            refreshCoachRecruitPool(true);
+        }
+
+        function renderCoachMode() {
+            const el = document.getElementById('coachTabContent');
+            if (!el) return;
+            const cm = gameState.coachMode;
+            if (!cm.unlocked) {
+                el.innerHTML = `<div style="padding:18px;color:#666;font-size:13px;text-align:center;">Coach Mode is locked. Earn the Iron Encyclopedia achievement to unlock.</div>`;
+                return;
+            }
+            refreshCoachRecruitPool();
+
+            let html = `<div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(120px,1fr));gap:8px;margin-bottom:14px;">
+                <div style="background:#1a1a2a;padding:10px;border-radius:6px;text-align:center;">
+                    <div style="font-size:10px;color:#888;text-transform:uppercase;">Coach Fame</div>
+                    <div style="font-size:18px;font-weight:bold;color:#FFD700;">${Math.floor(cm.fame)}</div>
+                </div>
+                <div style="background:#1a1a2a;padding:10px;border-radius:6px;text-align:center;">
+                    <div style="font-size:10px;color:#888;text-transform:uppercase;">Roster</div>
+                    <div style="font-size:18px;font-weight:bold;color:#ddd;">${cm.trainees.length} / ${cm.maxRoster}</div>
+                </div>
+                <div style="background:#1a1a2a;padding:10px;border-radius:6px;text-align:center;">
+                    <div style="font-size:10px;color:#888;text-transform:uppercase;">Graduated</div>
+                    <div style="font-size:18px;font-weight:bold;color:#8fd88f;">${cm.graduated}</div>
+                </div>
+                <div style="background:#1a1a2a;padding:10px;border-radius:6px;text-align:center;">
+                    <div style="font-size:10px;color:#888;text-transform:uppercase;">Meet Wins</div>
+                    <div style="font-size:18px;font-weight:bold;color:#aaf;">${cm.meetWins}</div>
+                </div>
+            </div>`;
+
+            // Roster
+            html += `<div style="font-size:11px;color:#888;text-transform:uppercase;letter-spacing:1px;margin-bottom:6px;">Your Roster</div>`;
+            if (cm.trainees.length === 0) {
+                html += `<div style="color:#666;font-size:12px;padding:8px;background:#1a1a1a;border-radius:6px;margin-bottom:12px;">No trainees yet. Recruit one from the pool below.</div>`;
+            } else {
+                cm.trainees.forEach(t => {
+                    const total = Math.floor(t.squat + t.bench + t.deadlift);
+                    const pct = Math.min(100, total / 500 * 100);
+                    const ready = total >= 200 && t.meetCooldown <= 0;
+                    const cdTxt = t.meetCooldown > 0
+                        ? `Recovering ${Math.floor(t.meetCooldown / 60)}:${Math.floor(t.meetCooldown % 60).toString().padStart(2,'0')}`
+                        : (total < 200 ? `Need 200 kg total to compete` : `Ready to compete`);
+                    html += `<div style="background:#1a1a2a;border:1px solid #334;border-radius:8px;padding:10px;margin-bottom:8px;">
+                        <div style="display:flex;justify-content:space-between;align-items:baseline;">
+                            <div>
+                                <strong style="color:#ddd;font-size:13px;">${t.name}</strong>
+                                <span style="font-size:11px;color:#888;margin-left:6px;">${t.archetype}</span>
+                            </div>
+                            <span style="font-size:11px;color:#aaa;">Fame ${Math.floor(t.fame)} · W ${t.meetsWon||0} / L ${t.meetsLost||0}</span>
+                        </div>
+                        <div style="display:grid;grid-template-columns:repeat(4,1fr);gap:5px;margin:6px 0;font-size:11px;">
+                            <div>SQ: <strong style="color:#2196F3;">${Math.floor(t.squat)}</strong></div>
+                            <div>BP: <strong style="color:#4CAF50;">${Math.floor(t.bench)}</strong></div>
+                            <div>DL: <strong style="color:#FF5722;">${Math.floor(t.deadlift)}</strong></div>
+                            <div>Total: <strong style="color:#ddd;">${total}</strong></div>
+                        </div>
+                        <div style="font-size:11px;color:#888;margin-bottom:4px;">Tech ${Math.floor(t.technique)} · Mot ${Math.floor(t.motivation)} · ${cdTxt}</div>
+                        <div style="background:#0a0a14;border-radius:3px;height:6px;overflow:hidden;margin-bottom:8px;">
+                            <div style="background:linear-gradient(90deg,#9C27B0,#E040FB);height:100%;width:${pct}%;"></div>
+                        </div>
+                        <div style="display:grid;grid-template-columns:repeat(4,1fr);gap:3px;margin-bottom:6px;">
+                            ${['balanced','squat','bench','deadlift'].map(f =>
+                                `<button class="btn ${t.focus===f?'btn-success':'btn-primary'}" style="padding:3px;font-size:10px;" onclick="setTraineeFocus('${t.id}','${f}')">${f}</button>`
+                            ).join('')}
+                        </div>
+                        <div style="display:grid;grid-template-columns:1fr 1fr;gap:4px;">
+                            <button class="btn btn-primary" style="padding:5px;font-size:11px;" onclick="sendTraineeToMeet('${t.id}')" ${ready ? '' : 'disabled'}>Send to Meet</button>
+                            <button class="btn btn-warning" style="padding:5px;font-size:11px;" onclick="dismissTraineeById('${t.id}')">Dismiss</button>
+                        </div>
+                    </div>`;
+                });
+            }
+
+            // Recruit pool
+            html += `<div style="font-size:11px;color:#888;text-transform:uppercase;letter-spacing:1px;margin:14px 0 6px;">Available Recruits</div>`;
+            if (cm.trainees.length >= cm.maxRoster) {
+                html += `<div style="color:#888;font-size:11px;padding:6px;">Roster full. Dismiss or graduate someone to sign new talent.</div>`;
+            }
+            if (cm.recruitPool.length === 0) {
+                html += `<div style="color:#666;font-size:12px;padding:8px;background:#1a1a1a;border-radius:6px;">No new recruits right now. Check back in ~5 minutes.</div>`;
+            } else {
+                cm.recruitPool.forEach((r, i) => {
+                    const total = r.squat + r.bench + r.deadlift;
+                    html += `<div style="background:#1a1a1a;border:1px solid #444;border-radius:6px;padding:8px;margin-bottom:6px;">
+                        <div style="display:flex;justify-content:space-between;align-items:baseline;">
+                            <strong style="color:#ddd;">${r.name}</strong>
+                            <span style="font-size:11px;color:#aaa;">${r.archetype} · ${total} kg</span>
+                        </div>
+                        <div style="font-size:11px;color:#888;font-style:italic;margin:3px 0;">${r.flavor}</div>
+                        <button class="btn btn-success" style="padding:4px 10px;font-size:11px;width:100%;" onclick="recruitTrainee(${i})" ${cm.trainees.length >= cm.maxRoster ? 'disabled' : ''}>Sign ${r.name.split(' ')[0]}</button>
+                    </div>`;
+                });
+            }
+
+            el.innerHTML = html;
         }
 
         const FOCUS_WEIGHTS = {
@@ -7279,6 +7633,14 @@
         if (!gameState.tournament.fedWins) gameState.tournament.fedWins = { ipf: false, wrpf: false, usapl: false };
         if (gameState.tournament.dailyCompleted === undefined) gameState.tournament.dailyCompleted = 0;
         if (gameState.personalMethod === undefined) gameState.personalMethod = false;
+        if (!gameState.coachMode) gameState.coachMode = { unlocked: false, trainees: [], recruitPool: [], nextRecruitTimer: 0, graduated: 0, meetWins: 0, fame: 0, maxRoster: 2 };
+        if (!Array.isArray(gameState.coachMode.trainees))      gameState.coachMode.trainees = [];
+        if (!Array.isArray(gameState.coachMode.recruitPool))   gameState.coachMode.recruitPool = [];
+        if (gameState.coachMode.nextRecruitTimer === undefined) gameState.coachMode.nextRecruitTimer = 0;
+        if (gameState.coachMode.graduated === undefined)        gameState.coachMode.graduated = 0;
+        if (gameState.coachMode.meetWins === undefined)         gameState.coachMode.meetWins = 0;
+        if (gameState.coachMode.fame === undefined)             gameState.coachMode.fame = 0;
+        if (gameState.coachMode.maxRoster === undefined)        gameState.coachMode.maxRoster = 2;
 
         // Initialise records from current save
         updateRecords();
