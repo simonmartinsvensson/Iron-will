@@ -779,18 +779,34 @@
         }
 
         /* Notifications */
-        .notification {
+        #notificationStack {
             position: fixed;
             top: 20px;
             right: 20px;
+            display: flex;
+            flex-direction: column;
+            gap: 8px;
+            z-index: 1000;
+            pointer-events: none;       /* notifications themselves re-enable below */
+            max-width: 320px;
+        }
+        .notification {
             background: #2196F3;
             color: white;
             padding: 15px 20px;
             border-radius: 8px;
             box-shadow: 0 5px 20px rgba(0, 0, 0, 0.3);
             animation: slideIn 0.3s ease;
-            z-index: 1000;
-            max-width: 300px;
+            max-width: 100%;
+            pointer-events: auto;
+            white-space: pre-line;       /* preserve "\n" line breaks in PR messages */
+        }
+        .notification.fading {
+            animation: slideOut 0.3s ease forwards;
+        }
+        @keyframes slideOut {
+            from { transform: translateX(0); opacity: 1; }
+            to   { transform: translateX(400px); opacity: 0; }
         }
 
         .notification.pr {
@@ -1052,6 +1068,23 @@
 
         .tab-btn:hover { color: #bbb; }
         .tab-btn.active { color: #2196F3; border-bottom-color: #2196F3; background: #161b20; }
+        .tab-btn { position: relative; }
+        .tab-btn.has-badge::after {
+            content: '';
+            position: absolute;
+            top: 8px;
+            right: 8px;
+            width: 8px;
+            height: 8px;
+            border-radius: 50%;
+            background: #FF5722;
+            box-shadow: 0 0 6px rgba(255, 87, 34, 0.7);
+            animation: badgePulse 1.6s ease-in-out infinite;
+        }
+        @keyframes badgePulse {
+            0%,100% { transform: scale(1);   opacity: 1; }
+            50%     { transform: scale(1.3); opacity: 0.6; }
+        }
 
         .tab-panel { display: none; }
         .tab-panel.active { display: block; }
@@ -1768,7 +1801,7 @@
                     <button onclick="document.getElementById('importModal').classList.add('active')" style="padding: 4px 10px; font-size: 11px; background: #37474F; color: white; border: none; border-radius: 3px; cursor: pointer;">📥 Import Save</button>
                 </div>
                 <div id="debugInfo" style="font-family: monospace; font-size: 10px; margin-top: 6px;">Ready</div>
-                <div style="font-size: 10px; color: #555; margin-top: 4px;">Last patch: <span style="color:#666;">2026-05-24 22:41</span></div>
+                <div style="font-size: 10px; color: #555; margin-top: 4px;">Last patch: <span style="color:#666;">2026-05-25 08:04</span></div>
             </div>
         </div>
 
@@ -2936,15 +2969,36 @@
         }
 
         // Show notification
-        function showNotification(message, type = 'info') {
+        function showNotification(message, type = 'info', duration = 3000) {
+            let stack = document.getElementById('notificationStack');
+            if (!stack) {
+                stack = document.createElement('div');
+                stack.id = 'notificationStack';
+                document.body.appendChild(stack);
+            }
+            // De-dupe: if the same message is already showing, skip — prevents
+            // a tick-driven duplicate (e.g. high-fatigue warning) from piling on.
+            for (const existing of stack.children) {
+                if (existing.dataset.msg === message) return;
+            }
             const notification = document.createElement('div');
             notification.className = `notification ${type}`;
             notification.textContent = message;
-            document.body.appendChild(notification);
+            notification.dataset.msg = message;
+            // Cap the stack — drop the oldest (last child since newest is prepended) if >5.
+            while (stack.children.length >= 5) {
+                stack.lastChild.remove();
+            }
+            // Prepend so the newest notification is at the top of the stack.
+            stack.insertBefore(notification, stack.firstChild);
 
+            // Slide out cleanly, then remove.
             setTimeout(() => {
-                notification.remove();
-            }, 3000);
+                if (notification.parentNode) {
+                    notification.classList.add('fading');
+                    setTimeout(() => notification.remove(), 300);
+                }
+            }, duration);
         }
 
         // Game loop
@@ -3227,7 +3281,8 @@
             // Endgame: update mythic record tracking and check for mastery rank ups.
             updateMythicRecords();
             checkMasteryUnlocks();
-            if (critical) showNotification(`CRITICAL — ${selectedLift} ${Math.floor(gameState[selectedLift])}kg (+${gain.toFixed(1)})`, 'pr');
+            // Critical PR is folded into the main PR notification below — no
+            // separate popup (used to fire two stacked notifications per crit).
 
             // Benefits
             gameState.motivation = Math.min(100, Math.min(sponsorMotCap(), gameState.motivation + 20));
@@ -3242,9 +3297,11 @@
 
             if (silent) return;
 
-            // Show PR notification
+            // Show PR notification (critical PRs get a prefix instead of a 2nd popup)
             const liftName = selectedLift.charAt(0).toUpperCase() + selectedLift.slice(1);
-            const prFlavorText = prMessages[Math.floor(Math.random() * prMessages.length)];
+            const prFlavorText = critical
+                ? '⚡ CRITICAL — ' + prMessages[Math.floor(Math.random() * prMessages.length)]
+                : prMessages[Math.floor(Math.random() * prMessages.length)];
             showNotification(`${prFlavorText}\n${liftName}: ${Math.floor(gameState[selectedLift])}kg (+${gain.toFixed(1)}kg)`, 'pr');
 
             // Screen shake effect
@@ -3886,6 +3943,19 @@
             // Tournament — show once player has reached the World+ tier
             const tournSec = document.getElementById('tournamentSection');
             if (tournSec) tournSec.style.display = (gameState.federation && ['world','pantheon'].includes(gameState.federation.rank)) ? '' : 'none';
+
+            // Tab badges — pulse a dot on the tab when something is waiting.
+            const gearTabBtn     = document.querySelector('.tab-btn[data-tab="gear"]');
+            const progressTabBtn = document.querySelector('.tab-btn[data-tab="progress"]');
+            const gearPending =
+                (Array.isArray(gameState.sponsorOffers) && gameState.sponsorOffers.length > 0 && !gameState.sponsor) ||
+                !!gameState.strongmanCurrent;
+            const dailyClaimable = gameState.dailyChallenge && gameState.dailyChallenge.complete && !gameState.dailyChallenge.claimed;
+            const mindPointsToSpend = f.mindTree_unlock && getMindPointsAvailable() > 0;
+            const tournamentReady = gameState.tournament && gameState.tournament.completed && !gameState.tournament.claimed;
+            const progressPending = dailyClaimable || mindPointsToSpend || tournamentReady;
+            if (gearTabBtn)     gearTabBtn.classList.toggle('has-badge', gearPending);
+            if (progressTabBtn) progressTabBtn.classList.toggle('has-badge', progressPending);
         }
 
         // ── Perks ────────────────────────────────────────────────────────────
@@ -4743,7 +4813,7 @@
             const kBonus = 250 + 250 * gameState.pantheonRivals.length;
             gameState.knowledge += kBonus;
             addJournalEntry(`Defeated ${def.name}. Mythic perk earned: ${perk.name}. +${kBonus} Knowledge.`);
-            showNotification(`Pantheon victory — ${perk.icon} ${perk.name}. +${kBonus} Knowledge.`, 'pr');
+            showNotification(`Pantheon victory — ${perk.icon} ${perk.name}. +${kBonus} Knowledge.`, 'pr', 6000);
             checkAchievements();
             updateUI();
             renderPantheonRivals();
@@ -5729,7 +5799,7 @@
             gameState.tournament.claimed = true;
             gameState.personalMethod = true;
             addJournalEntry("The Iron Will Method named and claimed. It's yours now.");
-            showNotification('The Iron Will Method — +10% gains, +20% Knowledge forever', 'pr');
+            showNotification('The Iron Will Method — +10% gains, +20% Knowledge forever', 'pr', 8000);
             renderTournament();
             updateUI(); saveGame();
         }
@@ -6195,11 +6265,12 @@
                 gameState.knowledge += kBonus;
                 gameState.motivation = 100;
                 addJournalEntry(`World record attempt — ${lift}. The bar moved. The lights went silent. Success.`);
-                showNotification(`WORLD RECORD ATTEMPT — ${lift.toUpperCase()} — SUCCESS! +${kBonus} Knowledge`, 'pr');
+                // 6-second duration — a WR is a moment; don't let it flash by.
+                showNotification(`WORLD RECORD ATTEMPT — ${lift.toUpperCase()} — SUCCESS! +${kBonus} Knowledge`, 'pr', 6000);
             } else {
                 gameState.motivation = Math.max(30, gameState.motivation - 25);
                 addJournalEntry(`World record attempt — ${lift}. Near miss. So close it hurt.`);
-                showNotification(`World record attempt — ${lift.toUpperCase()} — narrowly missed. +75 Knowledge for the attempt.`, 'warning');
+                showNotification(`World record attempt — ${lift.toUpperCase()} — narrowly missed. +75 Knowledge for the attempt.`, 'warning', 6000);
                 gameState.knowledge += 75;
             }
             checkChallenges();
