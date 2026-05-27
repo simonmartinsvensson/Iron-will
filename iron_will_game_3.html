@@ -1802,7 +1802,7 @@
                     <button onclick="document.getElementById('importModal').classList.add('active')" style="padding: 4px 10px; font-size: 11px; background: #37474F; color: white; border: none; border-radius: 3px; cursor: pointer;">📥 Import Save</button>
                 </div>
                 <div id="debugInfo" style="font-family: monospace; font-size: 10px; margin-top: 6px;">Ready</div>
-                <div style="font-size: 10px; color: #555; margin-top: 4px;">Last patch: <span style="color:#666;">2026-05-25 10:31</span></div>
+                <div style="font-size: 10px; color: #555; margin-top: 4px;">Last patch: <span style="color:#666;">2026-05-25 10:52</span></div>
             </div>
         </div>
 
@@ -4601,9 +4601,12 @@
             { id: 'pr1000',      name: 'Dedicated',        desc: '1,000 all-time PRs',            icon: '🔥', check: gs => ((gs.legacy && gs.legacy.allTimePRs||0) + (gs.prCount||0)) >= 1000 },
 
             // ── Prestige / legacy ─────────────────────────────────────────────
-            { id: 'veteran',     name: 'Veteran',          desc: 'Complete 3 prestige cycles',    icon: '🎖️', check: gs => gs.prestigeCount >= 4 },
-            { id: 'prestige5',   name: 'Serial Athlete',   desc: 'Complete 5 prestige cycles',    icon: '🎭', check: gs => gs.prestigeCount >= 5 },
-            { id: 'prestige10',  name: 'Lifer',            desc: 'Complete 10 prestige cycles',   icon: '♾️', check: gs => gs.prestigeCount >= 10 },
+            // Use lifetime legacy.cycles, not in-life prestigeCount, so retire-to-coach
+            // doesn't reset progress toward these. Also corrects an off-by-one (description
+            // said "Complete N cycles" but check was prestigeCount >= N = N−1 cycles done).
+            { id: 'veteran',     name: 'Veteran',          desc: 'Complete 3 prestige cycles',    icon: '🎖️', check: gs => gs.legacy && (gs.legacy.cycles || 0) >= 3 },
+            { id: 'prestige5',   name: 'Serial Athlete',   desc: 'Complete 5 prestige cycles',    icon: '🎭', check: gs => gs.legacy && (gs.legacy.cycles || 0) >= 5 },
+            { id: 'prestige10',  name: 'Lifer',            desc: 'Complete 10 prestige cycles',   icon: '♾️', check: gs => gs.legacy && (gs.legacy.cycles || 0) >= 10 },
 
             // ── Endgame: Pantheon tier & Mythic Records ──────────────────────
             { id: 'rank_pantheon',  name: 'Of the Pantheon',     desc: 'Reach Pantheon division',                       icon: '👑', check: gs => gs.federation && gs.federation.rank === 'pantheon' },
@@ -4643,7 +4646,7 @@
             // ── Endgame: Stretch goals & hidden ──────────────────────────────
             { id: 'pr2500',         name: 'Two Thousand Five',   desc: '2,500 lifetime PRs',                             icon: '📊', check: gs => ((gs.legacy && gs.legacy.allTimePRs||0) + (gs.prCount||0)) >= 2500 },
             { id: 'pr5000',         name: 'Five Thousand PRs',   desc: '5,000 lifetime PRs',                             icon: '📈', check: gs => ((gs.legacy && gs.legacy.allTimePRs||0) + (gs.prCount||0)) >= 5000 },
-            { id: 'prestige25',     name: 'Quarter Century',     desc: 'Complete 25 prestige cycles',                    icon: '🪙', check: gs => gs.prestigeCount >= 25 },
+            { id: 'prestige25',     name: 'Quarter Century',     desc: 'Complete 25 prestige cycles (lifetime)',         icon: '🪙', check: gs => gs.legacy && (gs.legacy.cycles || 0) >= 25 },
             { id: 'comp25',         name: 'Platform Career',     desc: 'Enter 25 competitions',                          icon: '🎟️', check: gs => (gs.competitionsEntered||0) >= 25 },
             { id: 'comp50',         name: 'Old Hand',            desc: 'Enter 50 competitions',                          icon: '🎫', check: gs => (gs.competitionsEntered||0) >= 50 },
             { id: 'perfect_5',      name: 'Pressure Lifter',     desc: '5 perfect meets',                                icon: '✨', check: gs => (gs.perfectMeets||0) >= 5 },
@@ -4958,9 +4961,12 @@
 
         function canRetireToCoach() {
             // Available once the player has unlocked coaching AND meets thresholds.
+            // Both gates required so retiring isn't free after first legacy — Pantheon
+            // defeats persist across legacies, so OR'ing them with prestigeCount let a
+            // player chain retirements forever once they'd beaten 3 Pantheon rivals.
             const f = gameState.unlockedFeatures || {};
             if (!f.coaching) return false;
-            return gameState.prestigeCount >= 8 || (Array.isArray(gameState.pantheonRivals) && gameState.pantheonRivals.length >= 3);
+            return gameState.prestigeCount >= 8 && Array.isArray(gameState.pantheonRivals) && gameState.pantheonRivals.length >= 3;
         }
 
         function showRetireToCoachModal() {
@@ -5822,7 +5828,7 @@
             { id: 'tri_fed',          label: 'Win a meet under each sanctioning body (IPF / WRPF / USAPL)',     check: gs => gs.tournament && gs.tournament.fedWins && gs.tournament.fedWins.ipf && gs.tournament.fedWins.wrpf && gs.tournament.fedWins.usapl },
             { id: 'garage_full',      label: 'Build every Garage Gym room',                                     check: gs => GARAGE_ROOMS.every(r => gs.garage && gs.garage.rooms && gs.garage.rooms[r.id]) },
             { id: 'daily_30',         label: 'Claim 30 daily challenges',                                       check: gs => gs.tournament && (gs.tournament.dailyCompleted || 0) >= 30 },
-            { id: 'apprentice_3',     label: 'Coach three apprentices to graduation',                           check: gs => (gs.apprenticeRetired || 0) >= 3 },
+            { id: 'apprentice_3',     label: 'Coach three apprentices to graduation (apprentice or Coach Mode)', check: gs => ((gs.apprenticeRetired || 0) + ((gs.coachMode && gs.coachMode.graduated) || 0)) >= 3 },
             { id: 'achieve_50',       label: 'Unlock 50+ achievements',                                         check: gs => gs.achievements && Object.values(gs.achievements).filter(Boolean).length >= 50 },
             { id: 'legacy_1',         label: 'Complete one Legacy retirement',                                  check: gs => gs.legacy && (gs.legacy.legacyTier || 0) >= 1 },
             { id: 'mythic_trio',      label: 'Exceed the IPF World Record in all three lifts',                  check: gs => gs.mythicRecords && gs.mythicRecords.squat > 0 && gs.mythicRecords.bench > 0 && gs.mythicRecords.deadlift > 0 },
@@ -6072,7 +6078,10 @@
                 + (gameState.masteryRanks ? (gameState.masteryRanks.squat + gameState.masteryRanks.bench + gameState.masteryRanks.deadlift) * 0.02 : 0)
                 + Math.min(0.5, (gameState.prestigeCount || 1) * 0.02);
             // Each trainee grows by ~0.06 kg/sec total, scaled by coach skill & their motivation/technique.
-            cm.trainees.forEach(t => {
+            // Iterate a snapshot so graduateTrainee mutating cm.trainees mid-loop doesn't skip anyone.
+            const traineeSnapshot = cm.trainees.slice();
+            traineeSnapshot.forEach(t => {
+                if (!cm.trainees.includes(t)) return; // already removed (graduated/dismissed)
                 const dist = FOCUS_WEIGHTS[t.focus] || FOCUS_WEIGHTS.balanced;
                 const sum = dist[0] + dist[1] + dist[2];
                 const motivationMult = 0.6 + (t.motivation / 100) * 0.6; // 0.6–1.2×
@@ -6093,9 +6102,11 @@
             });
             // Coach fame ticks up slowly while you have anyone training
             if (cm.trainees.length > 0) cm.fame += 0.001 * delta * cm.trainees.length;
-            // Refresh recruit pool periodically
+            // Rotate recruit pool periodically — force replacement so the same names
+            // don't sit there forever once the pool is full.
             cm.nextRecruitTimer -= delta;
             if (cm.nextRecruitTimer <= 0) {
+                cm.recruitPool = [];
                 refreshCoachRecruitPool();
                 cm.nextRecruitTimer = 300; // 5 min
             }
