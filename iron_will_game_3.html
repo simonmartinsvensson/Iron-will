@@ -205,8 +205,7 @@
         /* ── LIFTER STATIC PICTOGRAMS ─────────────────────────────────────
            Each pose is its own <g class="pose pose-X"> in the SVG, drawn
            as a deliberate pictogram for that state. CSS shows only one
-           at a time based on the .lifter state class. No transforms,
-           no animations — just clean static illustrations. */
+           at a time based on the .lifter state class. */
         .lifter .pose                  { display: none; }
         .lifter.resting    .pose-rest,
         .lifter.walking    .pose-rest,
@@ -217,6 +216,36 @@
         .lifter.squatting   .pose-squat    { display: block; }
         .lifter.benching    .pose-bench    { display: block; }
         .lifter.deadlifting .pose-deadlift { display: block; }
+
+        /* Build overlays — hidden by default; shown per data-build below */
+        .lifter .belly,
+        .lifter .definition            { display: none; }
+
+        /* SKINNY — light weight class + rookie (low WR%) — narrow everything */
+        .lifter[data-build="skinny"]   .torso  { transform: scaleX(0.78); transform-origin: 45px 40px; }
+        .lifter[data-build="skinny"]   .arms   { transform: scaleX(0.78); transform-origin: 45px 45px; }
+        .lifter[data-build="skinny"]   .legs   { transform: scaleX(0.85); transform-origin: 45px 90px; }
+        .lifter[data-build="skinny"]   .traps  { transform: scaleY(0.5)  scaleX(0.8); transform-origin: 45px 26px; }
+        .lifter[data-build="skinny"]   .neck   { transform: scaleX(0.7); transform-origin: 45px 22px; }
+
+        /* RIPPED — light weight class + pro (high WR%) — defined, narrow waist */
+        .lifter[data-build="ripped"]   .torso  { transform: scaleX(0.92); transform-origin: 45px 40px; }
+        .lifter[data-build="ripped"]   .arms   { transform: scaleX(1.0); transform-origin: 45px 45px; }
+        .lifter[data-build="ripped"]   .legs   { transform: scaleX(0.95); transform-origin: 45px 90px; }
+        .lifter[data-build="ripped"]   .definition { display: block; }
+
+        /* HEAVY — heavy weight class + rookie — wide and soft, belly bulge */
+        .lifter[data-build="heavy"]    .torso  { transform: scaleX(1.30); transform-origin: 45px 40px; }
+        .lifter[data-build="heavy"]    .arms   { transform: scaleX(1.20); transform-origin: 45px 45px; }
+        .lifter[data-build="heavy"]    .legs   { transform: scaleX(1.18); transform-origin: 45px 90px; }
+        .lifter[data-build="heavy"]    .belly  { display: block; }
+
+        /* MUSCULAR — heavy weight class + pro — wide AND defined */
+        .lifter[data-build="muscular"] .torso  { transform: scaleX(1.35); transform-origin: 45px 40px; }
+        .lifter[data-build="muscular"] .arms   { transform: scaleX(1.30); transform-origin: 45px 45px; }
+        .lifter[data-build="muscular"] .legs   { transform: scaleX(1.25); transform-origin: 45px 90px; }
+        .lifter[data-build="muscular"] .traps  { transform: scaleY(1.2) scaleX(1.1); transform-origin: 45px 26px; }
+        .lifter[data-build="muscular"] .definition { display: block; }
 
         .chalk-dust {
             position: absolute;
@@ -1457,25 +1486,46 @@
                     <div class="platform-floor"></div>
                 </div>
                 
-                <!-- Lifter Character — pictogram-style static poses, one per state.
-                     Each pose is its own <g> drawn deliberately for stillness;
-                     CSS shows only the matching one based on the .lifter state class. -->
+                <!-- Lifter Character — powerlifter pictograms with build variants.
+                     Each pose is its own <g class="pose pose-X"> drawn for stillness.
+                     Sub-elements (.torso/.arms/.legs/.belly/.definition) get scaled
+                     and toggled by `data-build` ("skinny" / "ripped" / "heavy" /
+                     "muscular") based on bodyweight × WR%. -->
                 <svg id="lifter" class="lifter" viewBox="0 0 90 130"
                      xmlns="http://www.w3.org/2000/svg" overflow="visible">
 
-                  <!-- ── REST / WALKING — standing front view ── -->
+                  <!-- ── REST / WALKING — front view, standing ── -->
                   <g class="pose pose-rest" fill="#888888">
-                    <!-- head + neck -->
-                    <circle cx="45" cy="14" r="9"/>
-                    <rect x="42" y="22" width="6" height="4"/>
-                    <!-- torso (V-taper: wide shoulders, narrower waist) -->
-                    <path d="M 27 26 L 31 64 L 59 64 L 63 26 Q 60 24 45 24 Q 30 24 27 26 Z"/>
+                    <!-- head -->
+                    <circle class="head" cx="45" cy="14" r="9"/>
+                    <!-- thick powerlifter neck -->
+                    <rect class="neck" x="40" y="20" width="10" height="6"/>
+                    <!-- traps rising behind the neck -->
+                    <path class="traps" d="M 27 26 Q 35 18 45 22 Q 55 18 63 26 Z"/>
+                    <!-- torso V-taper (wide shoulders, slight waist) -->
+                    <path class="torso" d="M 27 26 L 31 56 L 59 56 L 63 26 Z"/>
+                    <!-- belly overlay (heavy / fat builds only) -->
+                    <ellipse class="belly" cx="45" cy="48" rx="18" ry="10"/>
+                    <!-- chest + ab definition lines (ripped / muscular builds only) -->
+                    <g class="definition" stroke="#333" stroke-width="0.9" fill="none" opacity="0.6">
+                      <line x1="36" y1="35" x2="54" y2="35"/>
+                      <line x1="45" y1="35" x2="45" y2="55"/>
+                      <line x1="40" y1="44" x2="50" y2="44"/>
+                      <line x1="40" y1="50" x2="50" y2="50"/>
+                    </g>
+                    <!-- lifting belt at waist -->
+                    <rect class="belt" x="29" y="54" width="32" height="6" fill="#1a1a1a"/>
+                    <rect class="belt-buckle" x="42" y="54" width="6" height="6" fill="#FFC107"/>
                     <!-- arms hanging at sides -->
-                    <path d="M 25 28 L 22 64 L 28 64 L 31 28 Z"/>
-                    <path d="M 65 28 L 68 64 L 62 64 L 59 28 Z"/>
-                    <!-- legs -->
-                    <path d="M 32 64 L 30 122 L 41 122 L 43 64 Z"/>
-                    <path d="M 58 64 L 60 122 L 49 122 L 47 64 Z"/>
+                    <g class="arms">
+                      <path d="M 22 28 L 22 64 L 30 64 L 28 28 Z"/>
+                      <path d="M 68 28 L 68 64 L 60 64 L 62 28 Z"/>
+                    </g>
+                    <!-- hips + legs -->
+                    <g class="legs">
+                      <path d="M 30 60 L 30 122 L 42 122 L 44 60 Z"/>
+                      <path d="M 60 60 L 60 122 L 48 122 L 46 60 Z"/>
+                    </g>
                     <!-- feet -->
                     <rect x="26" y="120" width="18" height="6" rx="2"/>
                     <rect x="46" y="120" width="18" height="6" rx="2"/>
@@ -1485,44 +1535,73 @@
                   <g class="pose pose-squat" fill="#1976D2" style="display:none">
                     <!-- bar across the back -->
                     <rect x="2" y="22" width="86" height="4" rx="1" fill="#999"/>
-                    <!-- plates -->
                     <circle cx="8"  cy="24" r="8" fill="#B71C1C" stroke="#E57373" stroke-width="1.5"/>
                     <circle cx="82" cy="24" r="8" fill="#B71C1C" stroke="#E57373" stroke-width="1.5"/>
-                    <!-- head poking just above the bar -->
-                    <circle cx="45" cy="18" r="8"/>
-                    <!-- torso (compressed, leaning slightly forward) -->
-                    <path d="M 31 24 L 30 56 L 60 56 L 59 24 Q 56 22 45 22 Q 34 22 31 24 Z"/>
-                    <!-- arms gripping bar wide, elbows tucked under bar -->
-                    <path d="M 30 26 L 18 32 L 17 26 L 28 22 Z"/>
-                    <path d="M 60 26 L 72 32 L 73 26 L 62 22 Z"/>
-                    <!-- thighs splayed wide (knees pointing out) -->
-                    <path d="M 32 56 L 14 88 L 28 90 L 40 64 Z"/>
-                    <path d="M 58 56 L 76 88 L 62 90 L 50 64 Z"/>
-                    <!-- shins coming back inward to feet -->
-                    <path d="M 14 88 L 22 122 L 32 122 L 28 90 Z"/>
-                    <path d="M 76 88 L 68 122 L 58 122 L 62 90 Z"/>
-                    <!-- feet -->
-                    <rect x="16" y="120" width="20" height="6" rx="2" fill="#222"/>
-                    <rect x="54" y="120" width="20" height="6" rx="2" fill="#222"/>
+                    <!-- head poking above bar -->
+                    <circle class="head" cx="45" cy="18" r="8"/>
+                    <!-- traps high under the bar -->
+                    <path class="traps" d="M 30 26 Q 38 20 45 22 Q 52 20 60 26 Z"/>
+                    <!-- compressed torso (slight forward lean) -->
+                    <path class="torso" d="M 30 26 L 30 52 L 60 52 L 60 26 Z"/>
+                    <ellipse class="belly" cx="45" cy="44" rx="17" ry="9"/>
+                    <g class="definition" stroke="#0d3a6e" stroke-width="0.9" fill="none" opacity="0.7">
+                      <line x1="36" y1="33" x2="54" y2="33"/>
+                      <line x1="45" y1="33" x2="45" y2="52"/>
+                      <line x1="40" y1="40" x2="50" y2="40"/>
+                      <line x1="40" y1="46" x2="50" y2="46"/>
+                    </g>
+                    <rect class="belt" x="29" y="50" width="32" height="5" fill="#1a1a1a"/>
+                    <rect class="belt-buckle" x="42" y="50" width="6" height="5" fill="#FFC107"/>
+                    <!-- arms reach up to grip the bar wide -->
+                    <g class="arms">
+                      <path d="M 30 26 L 18 30 L 17 24 L 28 22 Z"/>
+                      <path d="M 60 26 L 72 30 L 73 24 L 62 22 Z"/>
+                    </g>
+                    <!-- thighs splay wide, knees out -->
+                    <g class="legs">
+                      <path d="M 30 56 L 12 88 L 24 92 L 38 64 Z"/>
+                      <path d="M 60 56 L 78 88 L 66 92 L 52 64 Z"/>
+                      <path d="M 12 88 L 20 122 L 32 122 L 28 92 Z"/>
+                      <path d="M 78 88 L 70 122 L 58 122 L 62 92 Z"/>
+                    </g>
+                    <!-- feet planted wide -->
+                    <rect x="14" y="120" width="22" height="6" rx="2" fill="#222"/>
+                    <rect x="54" y="120" width="22" height="6" rx="2" fill="#222"/>
                   </g>
 
                   <!-- ── BENCH — side profile, lockout above chest ── -->
                   <g class="pose pose-bench" fill="#388E3C" style="display:none">
-                    <!-- bench pad (horizontal) -->
+                    <!-- bench pad + uprights -->
                     <rect x="8" y="78" width="74" height="8" rx="2" fill="#444"/>
                     <rect x="14" y="86" width="4"  height="14" fill="#333"/>
                     <rect x="72" y="86" width="4"  height="14" fill="#333"/>
-                    <!-- body lying flat (head left, feet right) -->
-                    <!-- head -->
-                    <circle cx="18" cy="72" r="8"/>
-                    <!-- torso lying on bench (long horizontal shape) -->
-                    <path d="M 24 64 L 64 70 L 64 78 L 24 78 Z"/>
-                    <!-- legs bent off the end of the bench -->
-                    <path d="M 60 70 L 78 60 L 82 64 L 64 76 Z"/>
+                    <!-- head (side profile, on bench) -->
+                    <circle class="head" cx="18" cy="72" r="8"/>
+                    <!-- neck -->
+                    <rect class="neck" x="24" y="69" width="6" height="6"/>
+                    <!-- torso lying flat — V-taper points down toward feet -->
+                    <path class="torso" d="M 24 64 L 66 70 L 66 78 L 24 78 Z"/>
+                    <!-- belly bulge (heavy/fat) -->
+                    <ellipse class="belly" cx="48" cy="68" rx="14" ry="6"/>
+                    <!-- pec / ab definition -->
+                    <g class="definition" stroke="#1a4a1f" stroke-width="0.9" fill="none" opacity="0.7">
+                      <line x1="30" y1="68" x2="38" y2="68"/>
+                      <line x1="44" y1="69" x2="56" y2="69"/>
+                      <line x1="44" y1="73" x2="56" y2="73"/>
+                    </g>
+                    <!-- belt at waist (visible from side) -->
+                    <rect class="belt" x="56" y="66" width="14" height="6" fill="#1a1a1a"/>
+                    <rect class="belt-buckle" x="60" y="66" width="4" height="6" fill="#FFC107"/>
+                    <!-- legs bent off the end of bench -->
+                    <g class="legs">
+                      <path d="M 60 70 L 78 60 L 82 64 L 64 76 Z"/>
+                    </g>
                     <!-- arms pressing straight up to bar -->
-                    <path d="M 36 65 L 36 30 L 42 30 L 42 65 Z"/>
-                    <path d="M 50 65 L 50 30 L 56 30 L 56 65 Z"/>
-                    <!-- bar at lockout above the chest -->
+                    <g class="arms">
+                      <path d="M 36 65 L 36 30 L 42 30 L 42 65 Z"/>
+                      <path d="M 50 65 L 50 30 L 56 30 L 56 65 Z"/>
+                    </g>
+                    <!-- bar at lockout above chest -->
                     <rect x="2" y="22" width="86" height="4" rx="1" fill="#999"/>
                     <circle cx="8"  cy="24" r="8" fill="#B71C1C" stroke="#E57373" stroke-width="1.5"/>
                     <circle cx="82" cy="24" r="8" fill="#B71C1C" stroke="#E57373" stroke-width="1.5"/>
@@ -1530,24 +1609,43 @@
 
                   <!-- ── DEADLIFT — side profile, lockout at hip ── -->
                   <g class="pose pose-deadlift" fill="#E64A19" style="display:none">
-                    <!-- head (side profile) -->
-                    <circle cx="42" cy="14" r="9"/>
-                    <!-- torso (slightly leaning back, side view — narrower than front view) -->
-                    <path d="M 38 22 L 34 70 L 50 70 L 48 22 Q 46 20 42 20 Q 38 20 38 22 Z"/>
-                    <!-- back arm (further) — straight down to bar -->
-                    <path d="M 36 26 L 35 78 L 41 78 L 41 26 Z"/>
-                    <!-- front arm — straight down to bar -->
-                    <path d="M 44 26 L 45 78 L 51 78 L 51 26 Z"/>
-                    <!-- bar at hip level, held in front -->
+                    <!-- head -->
+                    <circle class="head" cx="42" cy="14" r="9"/>
+                    <!-- thick neck -->
+                    <rect class="neck" x="39" y="22" width="6" height="6"/>
+                    <!-- traps behind the head -->
+                    <path class="traps" d="M 34 28 Q 38 22 42 24 Q 46 22 50 28 Z"/>
+                    <!-- torso (side view, slightly narrower than front view) -->
+                    <path class="torso" d="M 34 28 L 32 70 L 52 70 L 50 28 Z"/>
+                    <!-- belly bulge (side view) -->
+                    <ellipse class="belly" cx="42" cy="56" rx="14" ry="11"/>
+                    <!-- chest / ab definition -->
+                    <g class="definition" stroke="#7a2410" stroke-width="0.9" fill="none" opacity="0.7">
+                      <line x1="36" y1="40" x2="48" y2="40"/>
+                      <line x1="42" y1="40" x2="42" y2="68"/>
+                      <line x1="38" y1="50" x2="46" y2="50"/>
+                      <line x1="38" y1="58" x2="46" y2="58"/>
+                    </g>
+                    <!-- belt at waist -->
+                    <rect class="belt" x="32" y="66" width="22" height="6" fill="#1a1a1a"/>
+                    <rect class="belt-buckle" x="40" y="66" width="6" height="6" fill="#FFC107"/>
+                    <!-- arms straight down to bar -->
+                    <g class="arms">
+                      <path d="M 34 28 L 33 78 L 41 78 L 41 28 Z"/>
+                      <path d="M 50 28 L 51 78 L 43 78 L 43 28 Z"/>
+                    </g>
+                    <!-- bar at hip level -->
                     <rect x="0" y="76" width="90" height="4" rx="1" fill="#999"/>
                     <circle cx="6"  cy="78" r="8" fill="#B71C1C" stroke="#E57373" stroke-width="1.5"/>
                     <circle cx="84" cy="78" r="8" fill="#B71C1C" stroke="#E57373" stroke-width="1.5"/>
-                    <!-- legs (slightly stocky, side view) -->
-                    <path d="M 36 70 L 33 122 L 44 122 L 44 70 Z"/>
-                    <path d="M 44 70 L 47 122 L 56 122 L 53 70 Z"/>
+                    <!-- legs (side view, slight stagger) -->
+                    <g class="legs">
+                      <path d="M 33 70 L 31 122 L 43 122 L 44 70 Z"/>
+                      <path d="M 44 70 L 45 122 L 56 122 L 53 70 Z"/>
+                    </g>
                     <!-- feet -->
-                    <rect x="30" y="120" width="18" height="6" rx="2" fill="#222"/>
-                    <rect x="46" y="120" width="18" height="6" rx="2" fill="#222"/>
+                    <rect x="28" y="120" width="18" height="6" rx="2" fill="#222"/>
+                    <rect x="44" y="120" width="18" height="6" rx="2" fill="#222"/>
                   </g>
 
                 </svg>
@@ -1706,7 +1804,7 @@
                     <button onclick="document.getElementById('importModal').classList.add('active')" style="padding: 4px 10px; font-size: 11px; background: #37474F; color: white; border: none; border-radius: 3px; cursor: pointer;">📥 Import Save</button>
                 </div>
                 <div id="debugInfo" style="font-family: monospace; font-size: 10px; margin-top: 6px;">Ready</div>
-                <div style="font-size: 10px; color: #555; margin-top: 4px;">Last patch: <span style="color:#666;">2026-05-29 14:01</span></div>
+                <div style="font-size: 10px; color: #555; margin-top: 4px;">Last patch: <span style="color:#666;">2026-05-29 15:52</span></div>
             </div>
         </div>
 
@@ -4495,9 +4593,22 @@
         // ── Lifter appearance ────────────────────────────────────────────────
 
         function updateLifterAppearance() {
-            // Pre-pictogram rig tinted #svgTorso per prestige cycle. The new
-            // static pictograms set their fill per-pose, so this is a no-op
-            // for now — re-add per-pose tinting here later if desired.
+            const lifter = document.getElementById('lifter');
+            if (!lifter) return;
+            // Build is a 2×2 of (weight class) × (WR% — rookie vs pro):
+            //   light + rookie  → skinny
+            //   light + pro     → ripped
+            //   heavy + rookie  → heavy
+            //   heavy + pro     → muscular
+            const bw = gameState.bodyweight || 83;
+            const total = gameState.squat + gameState.bench + gameState.deadlift;
+            const wrPct = getWRPct(total);
+            const isHeavy = bw >= 93;        // 93kg+ class
+            const isPro   = wrPct >= 50;      // 50%+ of WR = "operating at elite level"
+            const build = isHeavy
+                ? (isPro ? 'muscular' : 'heavy')
+                : (isPro ? 'ripped'   : 'skinny');
+            if (lifter.dataset.build !== build) lifter.dataset.build = build;
         }
 
         // ── New feature definitions ──────────────────────────────────────────
