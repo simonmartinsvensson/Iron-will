@@ -1802,7 +1802,7 @@
                     <button onclick="document.getElementById('importModal').classList.add('active')" style="padding: 4px 10px; font-size: 11px; background: #37474F; color: white; border: none; border-radius: 3px; cursor: pointer;">📥 Import Save</button>
                 </div>
                 <div id="debugInfo" style="font-family: monospace; font-size: 10px; margin-top: 6px;">Ready</div>
-                <div style="font-size: 10px; color: #555; margin-top: 4px;">Last patch: <span style="color:#666;">2026-05-25 10:52</span></div>
+                <div style="font-size: 10px; color: #555; margin-top: 4px;">Last patch: <span style="color:#666;">2026-05-29 09:14</span></div>
             </div>
         </div>
 
@@ -6244,12 +6244,15 @@
 
         // ── DOTS score (male formula) ────────────────────────────────────────
         function getDOTS(total, bw) {
-            const d = -0.000001093    * Math.pow(bw, 5)
-                    +  0.0007391293   * Math.pow(bw, 4)
-                    -  0.1918407227   * Math.pow(bw, 3)
-                    + 24.0900756      * Math.pow(bw, 2)
-                    - 1307.13137046235 * bw
-                    + 47228.67;
+            // Standard OpenPowerlifting men's DOTS — 4th-order denominator.
+            // The previous version used 5th-order with wrong constants, which
+            // made the denominator ~35× too large (DOTS 600 needed ~30 000 kg).
+            const d = -307.75076
+                    +  24.0900756    * bw
+                    -   0.1918407227 * Math.pow(bw, 2)
+                    +   0.0007391293 * Math.pow(bw, 3)
+                    -   0.000001093  * Math.pow(bw, 4);
+            if (d <= 0) return 0;
             return (500 / d) * total;
         }
 
