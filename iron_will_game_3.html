@@ -202,43 +202,21 @@
             overflow: visible;
         }
 
-        /* ── LIFTER STATIC POSES ──────────────────────────────────────────
-           Animating the rig from independent SVG rects produced uncanny
-           snap-jointed motion (no parent/child joint hierarchy, bar drifting
-           off the grip). Replaced with one well-readable static pose per
-           state — the most iconic frame from each lift.
-
-           Walking and resting both fall back to the default standing SVG.
-           ─────────────────────────────────────────────────────────────── */
-
-        /* SQUAT — frozen at the bottom: knees wide, hips dropped, bar on traps */
-        .lifter.squatting              { transform: translateY(10px); }
-        .lifter.squatting #svgLThigh   { transform: rotate(-42deg); transform-origin: 37px 65px; }
-        .lifter.squatting #svgRThigh   { transform: rotate(42deg);  transform-origin: 44px 65px; }
-        .lifter.squatting #svgLShin    { transform: translate(-19px,-7px) rotate(-14deg); transform-origin: 37px 93px; }
-        .lifter.squatting #svgRShin    { transform: translate(19px,-7px)  rotate(14deg);  transform-origin: 44px 93px; }
-        .lifter.squatting #svgLFoot    { transform: translate(-22px,-6px); }
-        .lifter.squatting #svgRFoot    { transform: translate(22px,-6px); }
-        .lifter.squatting #svgLUArm    { transform: rotate(-55deg); transform-origin: 17px 27px; }
-        .lifter.squatting #svgRUArm    { transform: rotate(55deg);  transform-origin: 63px 27px; }
-        .lifter.squatting #svgLFArm    { transform: rotate(38deg);  transform-origin: 18px 49px; }
-        .lifter.squatting #svgRFArm    { transform: rotate(-38deg); transform-origin: 63px 49px; }
-        .lifter.squatting #svgBarbell  { transform: translate(40px,21px); opacity: 1; }
-
-        /* BENCH — frozen at lockout: figure horizontal, bar pressed above chest */
-        .lifter.benching               { transform: rotate(-87deg); transform-origin: center center; }
-        .lifter.benching #svgLUArm     { transform: rotate(90deg); transform-origin: 17px 27px; }
-        .lifter.benching #svgRUArm     { transform: rotate(90deg); transform-origin: 63px 27px; }
-        .lifter.benching #svgLFArm     { transform: rotate(-6deg); transform-origin: 18px 49px; }
-        .lifter.benching #svgRFArm     { transform: rotate(-6deg); transform-origin: 63px 49px; }
-        .lifter.benching #svgBarbell   { transform: translate(74px,14px); opacity: 1; }
-
-        /* DEADLIFT — frozen at lockout: upright, bar at hip */
-        .lifter.deadlifting #svgBarbell { transform: translate(40px,66px); opacity: 1; }
-
-        /* RESTING + WALKING — default standing SVG with no transforms; hide bar */
-        .lifter.resting #svgBarbell    { opacity: 0; }
-        .lifter.walking #svgBarbell    { opacity: 0; }
+        /* ── LIFTER STATIC PICTOGRAMS ─────────────────────────────────────
+           Each pose is its own <g class="pose pose-X"> in the SVG, drawn
+           as a deliberate pictogram for that state. CSS shows only one
+           at a time based on the .lifter state class. No transforms,
+           no animations — just clean static illustrations. */
+        .lifter .pose                  { display: none; }
+        .lifter.resting    .pose-rest,
+        .lifter.walking    .pose-rest,
+        .lifter             .pose-rest { display: block; }   /* default fallback */
+        .lifter.squatting   .pose-rest { display: none; }
+        .lifter.benching    .pose-rest { display: none; }
+        .lifter.deadlifting .pose-rest { display: none; }
+        .lifter.squatting   .pose-squat    { display: block; }
+        .lifter.benching    .pose-bench    { display: block; }
+        .lifter.deadlifting .pose-deadlift { display: block; }
 
         .chalk-dust {
             position: absolute;
@@ -1479,47 +1457,99 @@
                     <div class="platform-floor"></div>
                 </div>
                 
-                <!-- Lifter Character (SVG, side-articulated joints) -->
-                <svg id="lifter" class="lifter" viewBox="0 0 80 120"
+                <!-- Lifter Character — pictogram-style static poses, one per state.
+                     Each pose is its own <g> drawn deliberately for stillness;
+                     CSS shows only the matching one based on the .lifter state class. -->
+                <svg id="lifter" class="lifter" viewBox="0 0 90 130"
                      xmlns="http://www.w3.org/2000/svg" overflow="visible">
-                  <defs>
-                    <linearGradient id="bGrad" x1="0%" y1="0%" x2="100%" y2="0%">
-                      <stop offset="0%" stop-color="#555"/>
-                      <stop offset="15%" stop-color="#999"/>
-                      <stop offset="50%" stop-color="#ddd"/>
-                      <stop offset="85%" stop-color="#999"/>
-                      <stop offset="100%" stop-color="#555"/>
-                    </linearGradient>
-                  </defs>
-                  <!-- Barbell — centered at (0,0); positioned via CSS transform per exercise -->
-                  <g id="svgBarbell" class="barbell" opacity="0">
-                    <rect x="-65" y="-4" width="130" height="8" rx="3" fill="url(#bGrad)"/>
-                    <rect x="-79" y="-20" width="16" height="40" rx="2" fill="#B71C1C" stroke="#E57373" stroke-width="2"/>
-                    <rect x="63"  y="-20" width="16" height="40" rx="2" fill="#B71C1C" stroke="#E57373" stroke-width="2"/>
-                    <rect x="-63" y="-4"  width="6"  height="8"  fill="#555"/>
-                    <rect x="57"  y="-4"  width="6"  height="8"  fill="#555"/>
+
+                  <!-- ── REST / WALKING — standing front view ── -->
+                  <g class="pose pose-rest" fill="#888888">
+                    <!-- head + neck -->
+                    <circle cx="45" cy="14" r="9"/>
+                    <rect x="42" y="22" width="6" height="4"/>
+                    <!-- torso (V-taper: wide shoulders, narrower waist) -->
+                    <path d="M 27 26 L 31 64 L 59 64 L 63 26 Q 60 24 45 24 Q 30 24 27 26 Z"/>
+                    <!-- arms hanging at sides -->
+                    <path d="M 25 28 L 22 64 L 28 64 L 31 28 Z"/>
+                    <path d="M 65 28 L 68 64 L 62 64 L 59 28 Z"/>
+                    <!-- legs -->
+                    <path d="M 32 64 L 30 122 L 41 122 L 43 64 Z"/>
+                    <path d="M 58 64 L 60 122 L 49 122 L 47 64 Z"/>
+                    <!-- feet -->
+                    <rect x="26" y="120" width="18" height="6" rx="2"/>
+                    <rect x="46" y="120" width="18" height="6" rx="2"/>
                   </g>
-                  <!-- Back arm (right, behind torso) -->
-                  <rect id="svgRUArm" x="58" y="27" width="9"  height="22" rx="4" fill="#FFB74D"/>
-                  <rect id="svgRFArm" x="59" y="49" width="8"  height="19" rx="3" fill="#FFD9B3"/>
-                  <!-- Back leg (right) -->
-                  <rect id="svgRThigh" x="38" y="65" width="11" height="28" rx="5" fill="#0D47A1"/>
-                  <rect id="svgRShin"  x="39" y="93" width="10" height="20" rx="4" fill="#1565C0"/>
-                  <rect id="svgRFoot"  x="35" y="112" width="20" height="7" rx="3" fill="#111"/>
-                  <!-- Torso (jersey colour updated via JS) -->
-                  <rect id="svgTorso" x="25" y="24" width="30" height="43" rx="7" fill="#2196F3"/>
-                  <!-- Front leg (left) -->
-                  <rect id="svgLThigh" x="31" y="65" width="11" height="28" rx="5" fill="#1565C0"/>
-                  <rect id="svgLShin"  x="32" y="93" width="10" height="20" rx="4" fill="#1976D2"/>
-                  <rect id="svgLFoot"  x="28" y="112" width="20" height="7" rx="3" fill="#222"/>
-                  <!-- Head group (moves as unit) -->
-                  <g id="svgHeadGroup">
-                    <circle cx="40" cy="11" r="12" fill="#FFD9B3" stroke="#C8956C" stroke-width="2"/>
-                    <ellipse cx="40" cy="2"  rx="11" ry="7" fill="#3D2B1F"/>
+
+                  <!-- ── SQUAT — front view, deep bottom position ── -->
+                  <g class="pose pose-squat" fill="#1976D2" style="display:none">
+                    <!-- bar across the back -->
+                    <rect x="2" y="22" width="86" height="4" rx="1" fill="#999"/>
+                    <!-- plates -->
+                    <circle cx="8"  cy="24" r="8" fill="#B71C1C" stroke="#E57373" stroke-width="1.5"/>
+                    <circle cx="82" cy="24" r="8" fill="#B71C1C" stroke="#E57373" stroke-width="1.5"/>
+                    <!-- head poking just above the bar -->
+                    <circle cx="45" cy="18" r="8"/>
+                    <!-- torso (compressed, leaning slightly forward) -->
+                    <path d="M 31 24 L 30 56 L 60 56 L 59 24 Q 56 22 45 22 Q 34 22 31 24 Z"/>
+                    <!-- arms gripping bar wide, elbows tucked under bar -->
+                    <path d="M 30 26 L 18 32 L 17 26 L 28 22 Z"/>
+                    <path d="M 60 26 L 72 32 L 73 26 L 62 22 Z"/>
+                    <!-- thighs splayed wide (knees pointing out) -->
+                    <path d="M 32 56 L 14 88 L 28 90 L 40 64 Z"/>
+                    <path d="M 58 56 L 76 88 L 62 90 L 50 64 Z"/>
+                    <!-- shins coming back inward to feet -->
+                    <path d="M 14 88 L 22 122 L 32 122 L 28 90 Z"/>
+                    <path d="M 76 88 L 68 122 L 58 122 L 62 90 Z"/>
+                    <!-- feet -->
+                    <rect x="16" y="120" width="20" height="6" rx="2" fill="#222"/>
+                    <rect x="54" y="120" width="20" height="6" rx="2" fill="#222"/>
                   </g>
-                  <!-- Front arm (left, in front of torso) -->
-                  <rect id="svgLUArm" x="13" y="27" width="9"  height="22" rx="4" fill="#FFB74D"/>
-                  <rect id="svgLFArm" x="14" y="49" width="8"  height="19" rx="3" fill="#FFD9B3"/>
+
+                  <!-- ── BENCH — side profile, lockout above chest ── -->
+                  <g class="pose pose-bench" fill="#388E3C" style="display:none">
+                    <!-- bench pad (horizontal) -->
+                    <rect x="8" y="78" width="74" height="8" rx="2" fill="#444"/>
+                    <rect x="14" y="86" width="4"  height="14" fill="#333"/>
+                    <rect x="72" y="86" width="4"  height="14" fill="#333"/>
+                    <!-- body lying flat (head left, feet right) -->
+                    <!-- head -->
+                    <circle cx="18" cy="72" r="8"/>
+                    <!-- torso lying on bench (long horizontal shape) -->
+                    <path d="M 24 64 L 64 70 L 64 78 L 24 78 Z"/>
+                    <!-- legs bent off the end of the bench -->
+                    <path d="M 60 70 L 78 60 L 82 64 L 64 76 Z"/>
+                    <!-- arms pressing straight up to bar -->
+                    <path d="M 36 65 L 36 30 L 42 30 L 42 65 Z"/>
+                    <path d="M 50 65 L 50 30 L 56 30 L 56 65 Z"/>
+                    <!-- bar at lockout above the chest -->
+                    <rect x="2" y="22" width="86" height="4" rx="1" fill="#999"/>
+                    <circle cx="8"  cy="24" r="8" fill="#B71C1C" stroke="#E57373" stroke-width="1.5"/>
+                    <circle cx="82" cy="24" r="8" fill="#B71C1C" stroke="#E57373" stroke-width="1.5"/>
+                  </g>
+
+                  <!-- ── DEADLIFT — side profile, lockout at hip ── -->
+                  <g class="pose pose-deadlift" fill="#E64A19" style="display:none">
+                    <!-- head (side profile) -->
+                    <circle cx="42" cy="14" r="9"/>
+                    <!-- torso (slightly leaning back, side view — narrower than front view) -->
+                    <path d="M 38 22 L 34 70 L 50 70 L 48 22 Q 46 20 42 20 Q 38 20 38 22 Z"/>
+                    <!-- back arm (further) — straight down to bar -->
+                    <path d="M 36 26 L 35 78 L 41 78 L 41 26 Z"/>
+                    <!-- front arm — straight down to bar -->
+                    <path d="M 44 26 L 45 78 L 51 78 L 51 26 Z"/>
+                    <!-- bar at hip level, held in front -->
+                    <rect x="0" y="76" width="90" height="4" rx="1" fill="#999"/>
+                    <circle cx="6"  cy="78" r="8" fill="#B71C1C" stroke="#E57373" stroke-width="1.5"/>
+                    <circle cx="84" cy="78" r="8" fill="#B71C1C" stroke="#E57373" stroke-width="1.5"/>
+                    <!-- legs (slightly stocky, side view) -->
+                    <path d="M 36 70 L 33 122 L 44 122 L 44 70 Z"/>
+                    <path d="M 44 70 L 47 122 L 56 122 L 53 70 Z"/>
+                    <!-- feet -->
+                    <rect x="30" y="120" width="18" height="6" rx="2" fill="#222"/>
+                    <rect x="46" y="120" width="18" height="6" rx="2" fill="#222"/>
+                  </g>
+
                 </svg>
             </div>
         </div>
@@ -1676,7 +1706,7 @@
                     <button onclick="document.getElementById('importModal').classList.add('active')" style="padding: 4px 10px; font-size: 11px; background: #37474F; color: white; border: none; border-radius: 3px; cursor: pointer;">📥 Import Save</button>
                 </div>
                 <div id="debugInfo" style="font-family: monospace; font-size: 10px; margin-top: 6px;">Ready</div>
-                <div style="font-size: 10px; color: #555; margin-top: 4px;">Last patch: <span style="color:#666;">2026-05-29 12:57</span></div>
+                <div style="font-size: 10px; color: #555; margin-top: 4px;">Last patch: <span style="color:#666;">2026-05-29 14:01</span></div>
             </div>
         </div>
 
@@ -2853,7 +2883,8 @@
             // Update barbell plate appearance based on total weight
             const total = gameState.squat + gameState.bench + gameState.deadlift;
             const plateLevel = total < 250 ? 1 : total < 350 ? 2 : total < 500 ? 3 : total < 650 ? 4 : 5;
-            document.getElementById('svgBarbell').dataset.plates = plateLevel;
+            // Old rect-based barbell is gone (each pose has its own plates now).
+            // Keep plateLevel computation for any future use; no DOM write here.
             const totalDisplay = document.querySelector('.total-display');
             const currentLiftLabel = document.getElementById('currentLift');
             const squatRack = document.getElementById('squatRack');
@@ -4464,10 +4495,9 @@
         // ── Lifter appearance ────────────────────────────────────────────────
 
         function updateLifterAppearance() {
-            const torso = document.getElementById('svgTorso');
-            if (!torso) return;
-            const colors = ['#2196F3', '#4CAF50', '#FF9800', '#9C27B0', '#F44336'];
-            torso.style.fill = colors[Math.min((gameState.prestigeCount || 1) - 1, colors.length - 1)];
+            // Pre-pictogram rig tinted #svgTorso per prestige cycle. The new
+            // static pictograms set their fill per-pose, so this is a no-op
+            // for now — re-add per-pose tinting here later if desired.
         }
 
         // ── New feature definitions ──────────────────────────────────────────
