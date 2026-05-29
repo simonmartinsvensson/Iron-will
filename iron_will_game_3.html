@@ -1802,7 +1802,7 @@
                     <button onclick="document.getElementById('importModal').classList.add('active')" style="padding: 4px 10px; font-size: 11px; background: #37474F; color: white; border: none; border-radius: 3px; cursor: pointer;">📥 Import Save</button>
                 </div>
                 <div id="debugInfo" style="font-family: monospace; font-size: 10px; margin-top: 6px;">Ready</div>
-                <div style="font-size: 10px; color: #555; margin-top: 4px;">Last patch: <span style="color:#666;">2026-05-29 09:14</span></div>
+                <div style="font-size: 10px; color: #555; margin-top: 4px;">Last patch: <span style="color:#666;">2026-05-29 10:14</span></div>
             </div>
         </div>
 
@@ -2596,7 +2596,7 @@
             const supercomp      = hasPerk('supercomp') ? 1.15 : 1;
             const weightMult     = getWeightMultipliers().adapt;
             const nutritionMult  = gameState.nutrition === 'surplus' ? 1.10 : gameState.nutrition === 'deficit' ? 0.90 : 1;
-            const partnerMult    = gameState.trainingPartner > 0 ? 1 + PARTNER_TIERS[gameState.trainingPartner - 1].adaptBonus : 1;
+            const partnerMult    = (gameState.trainingPartner > 0 && !sponsorBlocks('partner')) ? 1 + PARTNER_TIERS[gameState.trainingPartner - 1].adaptBonus : 1;
             const peakMult       = (gameState.peaking > 0) ? 0.3 : 1;
             const gymMult        = 1 + GYM_TIERS[gameState.gymTier || 0].adaptBonus;
 
@@ -3311,7 +3311,7 @@
             // separate popup (used to fire two stacked notifications per crit).
 
             // Benefits
-            gameState.motivation = Math.min(100, Math.min(sponsorMotCap(), gameState.motivation + 20));
+            bumpMotivation(20);
             gameState.prCount++;
             gameState.lastPR = Date.now();
 
@@ -3416,7 +3416,7 @@
             }
             
             gameState.fatigue = Math.max(0, gameState.fatigue - 200);
-            gameState.motivation = Math.min(100, gameState.motivation + 10);
+            bumpMotivation(10);
             gameState.technique = Math.min(100, gameState.technique + 5);
             gameState.restCooldown = 300; // 5 minutes
             
@@ -3437,7 +3437,7 @@
             }
             
             gameState.fatigue = Math.max(0, gameState.fatigue - 500);
-            gameState.motivation = Math.min(100, gameState.motivation + 20);
+            bumpMotivation(20);
             gameState.technique = Math.min(100, gameState.technique + 10);
             gameState.deloadCooldown = 1200; // 20 minutes
             
@@ -3492,7 +3492,7 @@
             gameState.deadlift = 80;
             gameState.adaptation = 0;
             gameState.fatigue = 0;
-            gameState.motivation = 100;
+            setMotivation(100);
             const techBase = hasPerk('veteran') ? 70 : 50;
             // Knowledge gives a small technique head-start (capped at +20 so mechanic stays relevant)
             gameState.technique = Math.min(100, techBase + Math.min(20, gameState.knowledge * 0.02));
@@ -3579,7 +3579,8 @@
             },
             {
                 id: 'total500',
-                check: (gs, total) => getWRPct(total) >= 52,
+                // Literal 500 kg — story narrative says "Five hundred kilograms" verbatim.
+                check: (gs, total) => total >= 500,
                 chapter: 'Elite Territory',
                 title: 'The Thin Air Up Here',
                 story: `Five hundred kilograms.\n\nYou pause after the lift. The gym is the same gym it's always been, but something in the air feels different up here. The numbers that used to intimidate you are yours now. You have become the kind of lifter other people study.\n\nA newer member approaches you cautiously between sets. "How long have you been training?" You think about it seriously before answering.`,
@@ -3587,7 +3588,8 @@
             },
             {
                 id: 'total600',
-                check: (gs, total) => getWRPct(total) >= 63,
+                // Literal 600 kg — story narrative says "Six hundred kilograms" verbatim.
+                check: (gs, total) => total >= 600,
                 chapter: 'Mastery',
                 title: 'The Iron Whispers',
                 story: `Six hundred kilograms.\n\nYou have spent more hours under a bar than most people spend on anything they call a passion. You have learned the difference between pain and damage, between failure and defeat, between strength and force.\n\nThe iron doesn't lie. It never has. Everything you are right now — every kilogram — was earned.`,
@@ -4032,7 +4034,8 @@
 
             // ── Endgame-gated (only offered once the relevant system is in play; stack) ─
             { id: 'pantheon_hunter', name: 'Pantheon Hunter',   desc: 'Active Pantheon rivals grow 25% slower (stacks)',
-              available: gs => gs.federation && (gs.federation.rank === 'world' || gs.federation.rank === 'pantheon') },
+              // Only meaningful at Pantheon division (no Pantheon rivals spawn at World).
+              available: gs => gs.federation && gs.federation.rank === 'pantheon' },
             { id: 'mythic_amplifier', name: 'Mythic Amplifier', desc: 'Mythic-record Knowledge bonus +0.5% per kg, doubled (stacks)',
               available: gs => (gs.mythicRecords && (gs.mythicRecords.squat + gs.mythicRecords.bench + gs.mythicRecords.deadlift) > 0) || (gs.unlockedFeatures && gs.unlockedFeatures.mythicRecords) },
             { id: 'apex_predator', name: 'Apex Predator',       desc: '+20% to all PR gains while at Pantheon division',
@@ -4399,7 +4402,7 @@
                 id: 'great_sleep', chapter: 'Life Event', title: 'Best Sleep in Months',
                 story: `No alarm. No deadline. Eight hours so deep you wake up not knowing what day it is.\n\nYou hit the gym before breakfast. The bar feels light. Your technique is clean. It's one of those sessions.`,
                 unlock: 'Fatigue −300 · Motivation +20',
-                apply: gs => { gs.fatigue = Math.max(0, gs.fatigue - 300); gs.motivation = Math.min(100, gs.motivation + 20); },
+                apply: gs => { gs.fatigue = Math.max(0, gs.fatigue - 300); bumpMotivation(20); },
             },
             {
                 id: 'illness', chapter: 'Life Event', title: 'Caught Something',
@@ -4411,7 +4414,7 @@
                 id: 'inspire', chapter: 'Life Event', title: 'Watched the World Championships',
                 story: `You sit down to watch for fifteen minutes and end up glued to the screen for two hours.\n\nThe top lifters move differently. There's a precision to it, an inevitability. You close the laptop and immediately want to train.`,
                 unlock: 'Motivation +35',
-                apply: gs => { gs.motivation = Math.min(100, gs.motivation + 35); },
+                apply: gs => { bumpMotivation(35); },
             },
             {
                 id: 'holiday', chapter: 'Life Event', title: 'Holiday Weekend',
@@ -4423,7 +4426,7 @@
                 id: 'pr_video', chapter: 'Life Event', title: 'Found Your Old PR Video',
                 story: `You're scrolling through your phone and find a clip from two years ago. The form was rough. The bar path questionable. But the fight — the way you refused to miss that lift — is still there.\n\nSomething clicks.`,
                 unlock: 'Motivation +25 · Technique +5',
-                apply: gs => { gs.motivation = Math.min(100, gs.motivation + 25); gs.technique = Math.min(100, gs.technique + 5); },
+                apply: gs => { bumpMotivation(25); gs.technique = Math.min(100, gs.technique + 5); },
             },
             {
                 id: 'gym_wisdom', chapter: 'Life Event', title: 'An Old Lifter Shares Thirty Years',
@@ -4591,9 +4594,9 @@
             { id: 'perfect_meet',name: 'Perfect Meet',     desc: 'Go 9 for 9 on attempts',        icon: '✨', check: gs => (gs.perfectMeets||0) >= 1 },
 
             // ── Federation rank ───────────────────────────────────────────────
-            { id: 'rank_regional', name: 'Regional Circuit',   desc: 'Qualify for Regional division', icon: '🥈', check: gs => ['regional','national','world'].includes(gs.federation && gs.federation.rank) },
-            { id: 'rank_national', name: 'National Stage',     desc: 'Reach National division',       icon: '🥇', check: gs => ['national','world'].includes(gs.federation && gs.federation.rank) },
-            { id: 'rank_world',    name: 'World Stage',        desc: 'Reach World division',          icon: '🌍', check: gs => gs.federation && gs.federation.rank === 'world' },
+            { id: 'rank_regional', name: 'Regional Circuit',   desc: 'Qualify for Regional division', icon: '🥈', check: gs => ['regional','national','world','pantheon'].includes(gs.federation && gs.federation.rank) },
+            { id: 'rank_national', name: 'National Stage',     desc: 'Reach National division',       icon: '🥇', check: gs => ['national','world','pantheon'].includes(gs.federation && gs.federation.rank) },
+            { id: 'rank_world',    name: 'World Stage',        desc: 'Reach World division',          icon: '🌍', check: gs => gs.federation && ['world','pantheon'].includes(gs.federation.rank) },
 
             // ── PR milestones ─────────────────────────────────────────────────
             { id: 'pr100',       name: 'Century',          desc: '100 total PRs',                 icon: '💯', check: gs => ((gs.legacy && gs.legacy.allTimePRs||0) + (gs.prCount||0)) >= 100 },
@@ -5009,7 +5012,7 @@
 
             // Reset for the new "generation" — softer than prestige.
             gameState.squat = 60; gameState.bench = 40; gameState.deadlift = 80;
-            gameState.adaptation = 0; gameState.fatigue = 0; gameState.motivation = 100;
+            gameState.adaptation = 0; gameState.fatigue = 0; setMotivation(100);
             gameState.technique = 50;
             gameState.lastPR = Date.now();
             gameState.injuries = { squat: 0, bench: 0, deadlift: 0 };
@@ -5191,7 +5194,7 @@
             { id: 'studious',       name: 'Studious',         path: 'Mind',     cost: 2, desc: '+10% Knowledge from prestige' },
             { id: 'clear_eyes',     name: 'Clear Eyes',       path: 'Mind',     cost: 3, desc: 'Technique floor +5' },
             { id: 'composure',      name: 'Composure',        path: 'Mind',     cost: 3, desc: 'Critical PR chance +5%' },
-            { id: 'iron_mind',      name: 'Iron Mind',        path: 'Mind',     cost: 5, desc: '+25% Knowledge from competitions (capstone — needs 4 Mind talents)' },
+            { id: 'mind_capstone',  name: 'Iron Focus',       path: 'Mind',     cost: 5, desc: '+25% Knowledge from competitions (capstone — needs 4 Mind talents)' },
             // PLATFORM path
             { id: 'cool_pressure',  name: 'Cool Under Pressure', path: 'Platform', cost: 2, desc: 'Meet attempt success +5%' },
             { id: 'stage_lights',   name: 'Stage Lights',     path: 'Platform', cost: 2, desc: '+15% Knowledge from competition wins' },
@@ -5217,7 +5220,7 @@
             if (hasMindTalent(t.id)) return false;
             if (getMindPointsAvailable() < t.cost) return false;
             // Capstones need 4 talents in the same path already.
-            const capstones = ['built_different','iron_mind','crowd_power'];
+            const capstones = ['built_different','mind_capstone','crowd_power'];
             if (capstones.includes(t.id) && countMindPathTalents(t.path) < 4) return false;
             return true;
         }
@@ -5280,7 +5283,7 @@
         function getMindCompKnowledgeMult() {
             let m = 1;
             if (hasMindTalent('stage_lights')) m *= 1.15;
-            if (hasMindTalent('iron_mind'))    m *= 1.25;
+            if (hasMindTalent('mind_capstone')) m *= 1.25;
             return m;
         }
         function getMindRecoveryMult() {
@@ -5317,7 +5320,8 @@
                 id: def.id, day: today, type: def.type, target: def.target, label: def.label,
                 baseTotal: Math.floor(gameState.squat + gameState.bench + gameState.deadlift),
                 basePRs: (gameState.prCount || 0) + ((gameState.legacy && gameState.legacy.allTimePRs) || 0),
-                baseComps: gameState.competitionsEntered || 0,
+                // Use the lifetime WINS counter (not entries) so bombouts don't count.
+                baseComps: gameState.totalCompWins || 0,
                 baseCycles: gameState.prestigeCount || 1,
                 baseStrong: gameState.strongmanWins || 0,
                 progress: 0, complete: false, claimed: false,
@@ -5330,7 +5334,7 @@
             if (!d || d.claimed) return;
             const total = Math.floor(gameState.squat + gameState.bench + gameState.deadlift);
             const prs   = (gameState.prCount || 0) + ((gameState.legacy && gameState.legacy.allTimePRs) || 0);
-            const comps = gameState.competitionsEntered || 0;
+            const comps = gameState.totalCompWins || 0; // wins only, not entries
             const cyc   = gameState.prestigeCount || 1;
             const stron = gameState.strongmanWins || 0;
             switch (d.type) {
@@ -5476,6 +5480,21 @@
         function sponsorMotCap() {
             return (gameState.sponsor && gameState.sponsor.restriction === 'mot_cap') ? 80 : 100;
         }
+        // Centralised motivation updater. Enforces:
+        //   - Hard cap of 100 always
+        //   - Active sponsor's mot_cap restriction (80)
+        //   - Mind Tree "Crowd Power" floor of 50 during a competition
+        function motivationFloor() {
+            const inMeet = typeof compData !== 'undefined' && compData !== null;
+            return (inMeet && hasMindTalent('crowd_power')) ? 50 : 0;
+        }
+        function bumpMotivation(delta) {
+            const next = (gameState.motivation || 0) + delta;
+            gameState.motivation = Math.max(motivationFloor(), Math.min(sponsorMotCap(), next));
+        }
+        function setMotivation(value) {
+            gameState.motivation = Math.max(motivationFloor(), Math.min(sponsorMotCap(), value));
+        }
         function generateSponsorOffer() {
             if (gameState.sponsor) return; // already sponsored
             if (gameState.sponsorOffers.length >= 3) return;
@@ -5594,7 +5613,7 @@
                 addJournalEntry(`Won ${def.name} — improvised but won. +${k} Knowledge.`);
                 showNotification(`${def.name} — won! +${k} Knowledge`, 'pr');
             } else {
-                gameState.motivation = Math.max(30, gameState.motivation - 8);
+                setMotivation(Math.max(30, gameState.motivation - 8));
                 addJournalEntry(`${def.name} — couldn't finish. The bar wasn't built for this.`);
                 showNotification(`${def.name} — failed. Motivation −8`, 'warning');
             }
@@ -5687,7 +5706,7 @@
         const GARAGE_ROOMS = [
             { id: 'platform',     name: 'Lifting Platform',  cost: 150,  desc: '+5% adaptation rate' },
             { id: 'rack',         name: 'Power Rack',        cost: 300,  desc: '+5% to all PR gains' },
-            { id: 'plates',       name: 'Calibrated Plates', cost: 500,  desc: '+5% PR gains, more consistent meets' },
+            { id: 'plates',       name: 'Calibrated Plates', cost: 500,  desc: '+5% PR gains (true-weight plates)' },
             { id: 'spec_bars',    name: 'Specialty Bars',    cost: 800,  desc: 'Sticking point penalty halved' },
             { id: 'recovery',     name: 'Recovery Room',     cost: 1200, desc: 'Passive fatigue recovery +40%' },
             { id: 'video',        name: 'Video Setup',       cost: 1800, desc: 'Technique floor +8 (permanent)' },
@@ -6423,14 +6442,14 @@
             if (!gameState.season) {
                 const total = gameState.squat + gameState.bench + gameState.deadlift;
                 const dots = parseFloat(getDOTS(total, gameState.bodyweight || 83).toFixed(1));
-                gameState.season = generateSeasonGoal(total, dots, gameState.competitionsEntered || 0);
+                gameState.season = generateSeasonGoal(total, dots, gameState.totalCompWins || 0);
                 return;
             }
             const s = gameState.season;
             if (s.claimed) return;
             const total = Math.floor(gameState.squat + gameState.bench + gameState.deadlift);
             const dots  = parseFloat(getDOTS(total, gameState.bodyweight || 83).toFixed(1));
-            const wins  = gameState.competitionsEntered || 0;
+            const wins  = gameState.totalCompWins || 0; // wins, not entries
             const met   = (s.type === 'total' && total >= s.target)
                        || (s.type === 'dots'  && dots  >= s.target)
                        || (s.type === 'compWins' && wins >= s.target);
@@ -6458,7 +6477,7 @@
             const s = gameState.season;
             const total = Math.floor(gameState.squat + gameState.bench + gameState.deadlift);
             const dots  = parseFloat(getDOTS(total, gameState.bodyweight || 83).toFixed(1));
-            const wins  = gameState.competitionsEntered || 0;
+            const wins  = gameState.totalCompWins || 0; // wins, not entries
             let current, pct;
             if (s.type === 'total')    { current = total; pct = Math.min(100, Math.round((total / s.target) * 100)); }
             else if (s.type === 'dots') { current = dots;  pct = Math.min(100, Math.round((dots / s.target) * 100)); }
@@ -6631,12 +6650,12 @@
             if (success) {
                 const kBonus = 600;
                 gameState.knowledge += kBonus;
-                gameState.motivation = 100;
+                setMotivation(100);
                 addJournalEntry(`World record attempt — ${lift}. The bar moved. The lights went silent. Success.`);
                 // 6-second duration — a WR is a moment; don't let it flash by.
                 showNotification(`WORLD RECORD ATTEMPT — ${lift.toUpperCase()} — SUCCESS! +${kBonus} Knowledge`, 'pr', 6000);
             } else {
-                gameState.motivation = Math.max(30, gameState.motivation - 25);
+                setMotivation(Math.max(30, gameState.motivation - 25));
                 addJournalEntry(`World record attempt — ${lift}. Near miss. So close it hurt.`);
                 showNotification(`World record attempt — ${lift.toUpperCase()} — narrowly missed. +75 Knowledge for the attempt.`, 'warning', 6000);
                 gameState.knowledge += 75;
@@ -7117,7 +7136,10 @@
             const extra          = extraPenalty   || 0;
             // Mind Tree platform talents
             const coolBonus      = hasMindTalent('cool_pressure') ? 0.05 : 0;
-            const nervesBonus    = hasMindTalent('nerves') && ratio > 0.95 ? 0.10 : 0; // halves bombout (approx)
+            // Veteran Nerves: flat +6% on every attempt. The previous gate
+            // (ratio > 0.95) never triggered on the openers that actually cause
+            // bombouts, so the talent did nothing for the dangerous attempt.
+            const nervesBonus    = hasMindTalent('nerves') ? 0.06 : 0;
             return Math.max(0, Math.min(1, base + techBonus - fatiguePenal + compEdge + checklistBonus + mom - extra + coolBonus + nervesBonus));
         }
 
@@ -7420,17 +7442,20 @@
                 if (perfect) gameState.perfectMeets = (gameState.perfectMeets || 0) + 1;
             }
             gameState.competitionCooldown = (dnf ? 900 : 1800) * (hasMindTalent('quick_recovery') ? 0.75 : 1);
-            gameState.motivation = Math.min(100, gameState.motivation + (dnf ? 5 : 30));
+            bumpMotivation(dnf ? 5 : 30);
             gameState.peaking = 0;
             updateRecords();
-            if (!dnf) gameState.cycleCompWins = (gameState.cycleCompWins || 0) + 1;
+            if (!dnf) {
+                gameState.cycleCompWins   = (gameState.cycleCompWins   || 0) + 1;
+                gameState.totalCompWins   = (gameState.totalCompWins   || 0) + 1; // lifetime, used by daily/season
+            }
 
             // Rival
             let rivalMsg = '';
             if (gameState.rival && !dnf) {
                 const diff = compTotal - Math.floor(gameState.rival.total);
-                if (diff >= 0) { gameState.motivation = Math.min(100, gameState.motivation + 15); rivalMsg = `<div style="color:#8f8;font-size:12px;margin-top:6px;">Beat rival by ${diff}kg! Motivation +15</div>`; }
-                else           { gameState.motivation = Math.max(gameState.motivation - 10, 20);  rivalMsg = `<div style="color:#f88;font-size:12px;margin-top:6px;">${gameState.rival.name}: ${Math.floor(gameState.rival.total)}kg — ${Math.abs(diff)}kg ahead.</div>`; }
+                if (diff >= 0) { bumpMotivation(15); rivalMsg = `<div style="color:#8f8;font-size:12px;margin-top:6px;">Beat rival by ${diff}kg! Motivation +15</div>`; }
+                else           { setMotivation(Math.max(20, gameState.motivation - 10)); rivalMsg = `<div style="color:#f88;font-size:12px;margin-top:6px;">${gameState.rival.name}: ${Math.floor(gameState.rival.total)}kg — ${Math.abs(diff)}kg ahead.</div>`; }
             }
 
             // Federation rank-up (WR%-based — weight class neutral)
@@ -7597,6 +7622,11 @@
         if (!gameState.legacy)                          gameState.legacy = { bestTotal: 0, bestDots: 0, allTimePRs: 0, allTimeKnowledge: 0, cycles: Math.max(0, (gameState.prestigeCount || 1) - 1) };
         if (gameState.competitionsEntered === undefined) gameState.competitionsEntered = 0;
         if (gameState.competitionCooldown === undefined) gameState.competitionCooldown = 0;
+        // Lifetime competition WINS (not entries). Used by daily / season goals so
+        // bombing out doesn't count toward "Win a competition" challenges. Seed
+        // from competitionsEntered for old saves so existing season goals don't
+        // suddenly become unreachable.
+        if (gameState.totalCompWins === undefined) gameState.totalCompWins = gameState.competitionsEntered || 0;
         if (!gameState.perks)              gameState.perks = [];
         if (!gameState.injuries)           gameState.injuries = { squat: 0, bench: 0, deadlift: 0 };
         if (!gameState.accessories)        gameState.accessories = { squat: 0, bench: 0, deadlift: 0 };
@@ -7626,6 +7656,13 @@
         // Second-wave back-compat
         if (gameState.mindPointsSpent === undefined) gameState.mindPointsSpent = 0;
         if (!gameState.mindTree)                     gameState.mindTree = {};
+        // Migrate the old Mind Tree 'iron_mind' talent ID (clashed with the prestige
+        // perk of the same name) to its new ID 'mind_capstone'. Without this, players
+        // who already learned it would silently lose the effect.
+        if (gameState.mindTree.iron_mind && !gameState.mindTree.mind_capstone) {
+            gameState.mindTree.mind_capstone = true;
+            delete gameState.mindTree.iron_mind;
+        }
         if (gameState.dailyChallenge === undefined)  gameState.dailyChallenge = null;
         if (!gameState.liftVariants)                 gameState.liftVariants = { squat: 'high_bar', bench: 'paused', deadlift: 'conventional' };
         if (gameState.sponsor === undefined)         gameState.sponsor = null;
