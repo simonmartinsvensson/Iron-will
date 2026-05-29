@@ -1802,7 +1802,7 @@
                     <button onclick="document.getElementById('importModal').classList.add('active')" style="padding: 4px 10px; font-size: 11px; background: #37474F; color: white; border: none; border-radius: 3px; cursor: pointer;">📥 Import Save</button>
                 </div>
                 <div id="debugInfo" style="font-family: monospace; font-size: 10px; margin-top: 6px;">Ready</div>
-                <div style="font-size: 10px; color: #555; margin-top: 4px;">Last patch: <span style="color:#666;">2026-05-29 10:14</span></div>
+                <div style="font-size: 10px; color: #555; margin-top: 4px;">Last patch: <span style="color:#666;">2026-05-29 12:19</span></div>
             </div>
         </div>
 
@@ -2545,18 +2545,64 @@
         }
 
         // Export save to clipboard
+        // Salted FNV-1a (32-bit) + avalanche. Intentionally bespoke and *not*
+        // cryptographic — just enough friction to break casual notepad editing.
+        // A motivated player who reads this function can still forge a signature
+        // since the salt and steps are right here; that's an accepted trade-off
+        // for a client-side game where any "real" key has to live in source.
+        function _saveSignature(payload) {
+            const salt = 'ironwill::v1::2026::please-just-play-the-game';
+            const data = salt + payload + salt;
+            let h = 0x811c9dc5;
+            for (let i = 0; i < data.length; i++) {
+                h ^= data.charCodeAt(i);
+                h = Math.imul(h, 0x01000193);
+            }
+            h ^= h >>> 16; h = Math.imul(h, 0x85ebca6b);
+            h ^= h >>> 13; h = Math.imul(h, 0xc2b2ae35);
+            h ^= h >>> 16;
+            return (h >>> 0).toString(16).padStart(8, '0');
+        }
+
+        // Pack: produces `iw1.<base64(json)>.<sig>` — versioned prefix so the
+        // format can evolve. base64 also discourages casual JSON-looking edits.
+        function _packSave(jsonStr) {
+            const b64 = btoa(unescape(encodeURIComponent(jsonStr))); // UTF-8 safe
+            const sig = _saveSignature(jsonStr);
+            return 'iw1.' + b64 + '.' + sig;
+        }
+
+        // Unpack: returns { jsonStr, signed, valid }. Tolerates legacy raw-JSON
+        // pasted saves from before this patch (signed=false), so import flow
+        // can ask the user whether to load them anyway.
+        function _unpackSave(text) {
+            const trimmed = (text || '').trim();
+            if (trimmed.startsWith('iw1.')) {
+                const parts = trimmed.split('.');
+                if (parts.length !== 3) return { jsonStr: null, signed: true, valid: false };
+                try {
+                    const jsonStr = decodeURIComponent(escape(atob(parts[1])));
+                    return { jsonStr, signed: true, valid: _saveSignature(jsonStr) === parts[2] };
+                } catch (e) {
+                    return { jsonStr: null, signed: true, valid: false };
+                }
+            }
+            return { jsonStr: trimmed, signed: false, valid: false };
+        }
+
         function exportSave() {
             saveGame();
             const data = localStorage.getItem('ironWillSave3');
             if (!data) { showNotification('No save data found', 'warning'); return; }
+            const packed = _packSave(data);
             if (navigator.clipboard && navigator.clipboard.writeText) {
-                navigator.clipboard.writeText(data).then(() => {
+                navigator.clipboard.writeText(packed).then(() => {
                     showNotification('Save copied to clipboard! Paste it anywhere to transfer.', 'success');
                 }).catch(() => {
-                    prompt('Copy this save code:', data);
+                    prompt('Copy this save code:', packed);
                 });
             } else {
-                prompt('Copy this save code:', data);
+                prompt('Copy this save code:', packed);
             }
         }
 
@@ -2564,10 +2610,19 @@
         function importSave() {
             const text = document.getElementById('importSaveText').value.trim();
             if (!text) { showNotification('Paste your save code first', 'warning'); return; }
+            const { jsonStr, signed, valid } = _unpackSave(text);
+            if (signed && !valid) {
+                showNotification('Save code is signed but the signature does not match — it may have been edited externally.', 'danger', 6000);
+                return;
+            }
+            if (!signed) {
+                // Legacy unsigned format (raw JSON). Require explicit consent.
+                if (!confirm('This save code is not signed (legacy format or hand-edited). Import anyway?')) return;
+            }
             try {
-                const data = JSON.parse(text);
+                const data = JSON.parse(jsonStr);
                 if (typeof data.squat !== 'number') throw new Error('Not a valid save');
-                localStorage.setItem('ironWillSave3', text);
+                localStorage.setItem('ironWillSave3', jsonStr);
                 document.getElementById('importModal').classList.remove('active');
                 document.getElementById('importSaveText').value = '';
                 loadGame();
