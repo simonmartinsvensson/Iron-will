@@ -1804,7 +1804,7 @@
                     <button onclick="document.getElementById('importModal').classList.add('active')" style="padding: 4px 10px; font-size: 11px; background: #37474F; color: white; border: none; border-radius: 3px; cursor: pointer;">📥 Import Save</button>
                 </div>
                 <div id="debugInfo" style="font-family: monospace; font-size: 10px; margin-top: 6px;">Ready</div>
-                <div style="font-size: 10px; color: #555; margin-top: 4px;">Last patch: <span style="color:#666;">2026-05-31 15:54</span></div>
+                <div style="font-size: 10px; color: #555; margin-top: 4px;">Last patch: <span style="color:#666;">2026-05-31 16:02</span></div>
             </div>
         </div>
 
@@ -6904,6 +6904,19 @@
         function renderCoachMode() {
             const el = document.getElementById('coachTabContent');
             if (!el) return;
+            try {
+                _renderCoachModeImpl(el);
+            } catch (err) {
+                // Surface the error visibly so a render failure doesn't leave a blank tab.
+                console.error('renderCoachMode failed:', err);
+                el.innerHTML = `<div style="padding:14px;color:#f88;background:#1a0a0a;border:1px solid #6a2a2a;border-radius:6px;font-size:12px;">
+                    <strong>Coach Mode render error</strong><br>
+                    <code style="font-size:11px;color:#fbb;">${(err && err.message) || err}</code><br>
+                    <span style="font-size:10px;color:#888;">Open the browser console for the full stack trace.</span>
+                </div>`;
+            }
+        }
+        function _renderCoachModeImpl(el) {
             const cm = gameState.coachMode;
             if (!cm.unlocked) {
                 el.innerHTML = `<div style="padding:18px;color:#666;font-size:13px;text-align:center;">Coach Mode is locked. Earn the Iron Encyclopedia achievement to unlock.</div>`;
