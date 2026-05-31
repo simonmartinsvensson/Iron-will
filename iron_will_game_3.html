@@ -1804,7 +1804,7 @@
                     <button onclick="document.getElementById('importModal').classList.add('active')" style="padding: 4px 10px; font-size: 11px; background: #37474F; color: white; border: none; border-radius: 3px; cursor: pointer;">📥 Import Save</button>
                 </div>
                 <div id="debugInfo" style="font-family: monospace; font-size: 10px; margin-top: 6px;">Ready</div>
-                <div style="font-size: 10px; color: #555; margin-top: 4px;">Last patch: <span style="color:#666;">2026-05-29 15:52</span></div>
+                <div style="font-size: 10px; color: #555; margin-top: 4px;">Last patch: <span style="color:#666;">2026-05-31 15:54</span></div>
             </div>
         </div>
 
@@ -2214,6 +2214,32 @@
                     Not Yet
                 </button>
             </div>
+        </div>
+    </div>
+
+    <!-- Trainee Event Modal — choice-based coach decisions -->
+    <div class="prestige-modal" id="traineeEventModal">
+        <div class="prestige-content" style="max-width:480px;">
+            <div id="traineeEventContent"></div>
+        </div>
+    </div>
+
+    <!-- Coach Skill Tree Modal -->
+    <div class="prestige-modal" id="coachSkillTreeModal">
+        <div class="prestige-content" style="max-width:680px;max-height:80vh;overflow-y:auto;">
+            <div style="display:flex;justify-content:space-between;align-items:baseline;margin-bottom:8px;">
+                <div class="prestige-title" style="font-size:18px;">Coach Skill Tree</div>
+                <button class="btn" style="padding:4px 10px;font-size:11px;" onclick="closeCoachSkillTreeModal()">Close</button>
+            </div>
+            <p style="color:#aaa;font-size:12px;margin-bottom:10px;">Spend Coach Points on permanent talents. Capstones require 2 prior talents in the same path.</p>
+            <div id="coachSkillTreeContent"></div>
+        </div>
+    </div>
+
+    <!-- Trainee Detail Modal — full per-trainee controls -->
+    <div class="prestige-modal" id="traineeDetailModal">
+        <div class="prestige-content" style="max-width:520px;max-height:90vh;overflow-y:auto;">
+            <div id="traineeDetailContent"></div>
         </div>
     </div>
 
@@ -4733,7 +4759,8 @@
             { id: 'all_perks',      name: 'Polymath',            desc: 'Earn at least one of every Pantheon perk',       icon: '🧠', check: gs => gs.pantheonPerks && gs.pantheonPerks.length >= 5 },
             { id: 'completionist',  name: 'Iron Encyclopedia',   desc: '(hidden) Unlock every other achievement',        icon: '📕', hidden: true, check: gs => {
                 if (!gs.achievements) return false;
-                const others = ACHIEVEMENT_DEFS.filter(a => a.id !== 'completionist' && !['coach_first','coach_full_roster','coach_grad_3','coach_grad_10','coach_meet_25'].includes(a.id));
+                const coachIds = ['coach_first','coach_full_roster','coach_grad_3','coach_grad_10','coach_meet_25','coach_world_win','coach_legend','coach_skill_max','coach_no_quit'];
+                const others = ACHIEVEMENT_DEFS.filter(a => a.id !== 'completionist' && !coachIds.includes(a.id));
                 return others.every(a => gs.achievements[a.id]);
             }},
             // ── Coach Mode achievements (post-Encyclopedia) ──────────────────
@@ -4742,6 +4769,11 @@
             { id: 'coach_grad_3',      name: 'Three to the Top',       desc: 'Graduate 3 trainees in Coach Mode',         icon: '🎓', check: gs => gs.coachMode && gs.coachMode.graduated >= 3 },
             { id: 'coach_grad_10',     name: 'A Coaching Career',      desc: 'Graduate 10 trainees in Coach Mode',        icon: '🏫', check: gs => gs.coachMode && gs.coachMode.graduated >= 10 },
             { id: 'coach_meet_25',     name: 'Pillar of the Sport',    desc: 'Win 25 trainee meets in Coach Mode',         icon: '🏛️', check: gs => gs.coachMode && gs.coachMode.meetWins >= 25 },
+            // Deep coach mode achievements
+            { id: 'coach_world_win',   name: 'World Stage Coach',      desc: 'Coach a trainee to a World-tier meet win',  icon: '🌍', check: gs => gs.coachMode && (gs.coachMode.trainees.some(t => t.meetTierWins && t.meetTierWins.world >= 1) || (Array.isArray(gs.coachMode.history) && gs.coachMode.history.length >= 5)) },
+            { id: 'coach_legend',      name: 'Talent Magnet',          desc: 'Sign a legendary recruit',                  icon: '⭐', check: gs => gs.coachMode && (gs.coachMode.trainees.some(t => t.legendary) || (Array.isArray(gs.coachMode.history) && gs.coachMode.history.some(h => h.archetype && h.archetype.startsWith('Legendary')))) },
+            { id: 'coach_skill_max',   name: 'Master Teacher',         desc: 'Unlock all 4 Coach Skill capstones',        icon: '🧠', check: gs => gs.coachMode && gs.coachMode.coachSkills && ['sc_master','psy_master','med_master','scout_legend'].every(id => gs.coachMode.coachSkills[id]) },
+            { id: 'coach_no_quit',     name: 'No One Walks Away',      desc: 'Resolve 10 trainee events',                 icon: '🤝', check: gs => gs.coachMode && (gs.coachMode.eventsResolved || 0) >= 10 },
         ];
 
         // ════════════════════════════════════════════════════════════════════
@@ -6018,208 +6050,688 @@
         }
 
         // ════════════════════════════════════════════════════════════════════
-        //  COACH MODE — Post-Iron Encyclopedia capstone gameplay
-        //  You step off the platform and run a roster of lifters.
+        //  COACH MODE — Deep coaching system
+        //   Per-trainee adaptation/fatigue/per-lift technique loops mirror the
+        //   player's own training depth. Personalities, ages, intensity
+        //   settings, rest weeks, accessory work, federation-tiered meets,
+        //   trainee events, career goals, and a 12-node Coach Skill Tree.
         // ════════════════════════════════════════════════════════════════════
 
         const COACH_FIRST_NAMES = [
             'Mateo','Sara','Ari','Jin','Lukas','Nadia','Theo','Ines','Sven','Mira',
-            'Karim','Yuki','Bea','Owen','Tana','Felix','Aisha','Diego','Hana','Noor'
+            'Karim','Yuki','Bea','Owen','Tana','Felix','Aisha','Diego','Hana','Noor',
+            'Kai','Iris','Reyes','Solveig','Niko','Ade','Lior','Mei','Anders','Zara'
         ];
         const COACH_LAST_NAMES  = [
             'Castro','Berg','Okafor','Park','Eriksson','Costa','Holm','Rivas','Stein','Tao',
-            'Iqbal','Sato','Vidic','Doyle','Patel','Almasi','Lund','Chen','Demir','Walsh'
+            'Iqbal','Sato','Vidic','Doyle','Patel','Almasi','Lund','Chen','Demir','Walsh',
+            'Olsen','Reyes','Kowalski','Maeda','Diop','Nguyen','Müller','Vargas','Sundqvist','Khan'
         ];
 
-        // Recruit archetypes — different starting strengths give the player
-        // a meaningful pick when refreshing the recruit pool.
+        // Each template has a starting stat profile, a flavor line, and a default
+        // career goal — graduation is no longer a flat 500 kg total but a goal
+        // chosen to match the archetype.
         const TRAINEE_TEMPLATES = [
-            { archetype: 'Rookie',         bias: 'balanced', sq: 50,  bn: 40,  dl: 70,  tech: 40, flavor: 'fresh out of a college lifting club' },
-            { archetype: 'Squat Specialist', bias: 'squat',  sq: 110, bn: 50,  dl: 85,  tech: 55, flavor: 'big legs, weak press' },
-            { archetype: 'Presser',        bias: 'bench',    sq: 65,  bn: 95,  dl: 70,  tech: 60, flavor: 'a former gymnast' },
-            { archetype: 'Puller',         bias: 'deadlift', sq: 80,  bn: 55,  dl: 130, tech: 50, flavor: 'lifelong manual labor' },
-            { archetype: 'Masters Athlete',bias: 'balanced', sq: 90,  bn: 70,  dl: 110, tech: 80, flavor: 'a 40-year-old comeback story' },
-            { archetype: 'Genetic Outlier',bias: 'balanced', sq: 100, bn: 80,  dl: 120, tech: 60, flavor: 'won juniors three years in a row' },
+            { archetype: 'Rookie',         bias: 'balanced', sq: 50,  bn: 40,  dl: 70,  tech: 40,
+              flavor: 'fresh out of a college lifting club',
+              goal: { type: 'total',    target: 400, label: 'Hit a 400 kg developmental total' } },
+            { archetype: 'Squat Specialist',bias: 'squat',   sq: 110, bn: 50,  dl: 85,  tech: 55,
+              flavor: 'big legs, weak press',
+              goal: { type: 'lift',     lift: 'squat', target: 280, label: 'Squat 280 kg in training' } },
+            { archetype: 'Presser',        bias: 'bench',    sq: 65,  bn: 95,  dl: 70,  tech: 60,
+              flavor: 'a former gymnast',
+              goal: { type: 'lift',     lift: 'bench', target: 180, label: 'Bench 180 kg in training' } },
+            { archetype: 'Puller',         bias: 'deadlift', sq: 80,  bn: 55,  dl: 130, tech: 50,
+              flavor: 'lifelong manual labor',
+              goal: { type: 'lift',     lift: 'deadlift', target: 300, label: 'Deadlift 300 kg in training' } },
+            { archetype: 'Masters Athlete',bias: 'balanced', sq: 90,  bn: 70,  dl: 110, tech: 80,
+              flavor: 'a 40-year-old comeback story',
+              goal: { type: 'meetTier', tier: 'national', label: 'Win a national meet' } },
+            { archetype: 'Genetic Outlier',bias: 'balanced', sq: 100, bn: 80,  dl: 120, tech: 60,
+              flavor: 'won juniors three years in a row',
+              goal: { type: 'total',    target: 550, label: 'Hit a 550 kg total' } },
         ];
 
+        // Personalities flavor how each trainee responds to coaching. Effects
+        // are subtle but real — they multiply growth, modify motivation floor,
+        // skew injury risk.
+        const PERSONALITY_INFO = {
+            eager:     { desc: 'pushes hard — but breaks if you push back',         growthMult: 1.18, injuryMult: 1.30, motivBoost:  5 },
+            stubborn:  { desc: 'slow to change focus, but consistent',              growthMult: 0.94, injuryMult: 0.85, motivBoost:  0 },
+            fragile:   { desc: 'high ceiling, glass body',                          growthMult: 1.08, injuryMult: 1.60, motivBoost:  0 },
+            steady:    { desc: 'predictable, never crashes, never breakthroughs',   growthMult: 0.92, injuryMult: 0.75, motivBoost: 10 },
+            ambitious: { desc: 'lives for hard sessions',                           growthMult: 1.05, injuryMult: 1.10, motivBoost: 15, prefersHard: true },
+        };
+        const PERSONALITY_KEYS = Object.keys(PERSONALITY_INFO);
+
+        // ── Coach Skill Tree ────────────────────────────────────────────────
+        //   12 talents across 4 paths. Coach Points are earned (2/graduation,
+        //   1/meet-win — see getCoachPointsEarned). Capstones require 2 prior
+        //   talents in the same path.
+        const COACH_SKILLS = [
+            // S&C path — trainee growth & periodization
+            { id: 'sc_basics',     path: 'S&C',   cost: 2, name: 'S&C Fundamentals',   desc: '+10% trainee growth rate' },
+            { id: 'sc_period',     path: 'S&C',   cost: 3, name: 'Periodization',      desc: 'Rest weeks restore +50% fatigue' },
+            { id: 'sc_master',     path: 'S&C',   cost: 5, name: 'Strength Coach',     desc: '+25% trainee growth (capstone)', capstone: true },
+            // Mind path — motivation, events
+            { id: 'psy_basics',    path: 'Mind',  cost: 2, name: 'Sports Psychology',  desc: 'Trainee motivation floor raised to 60' },
+            { id: 'psy_handle',    path: 'Mind',  cost: 3, name: 'Handling',           desc: 'Negative trainee events 50% less frequent' },
+            { id: 'psy_master',    path: 'Mind',  cost: 5, name: 'Mental Coach',       desc: 'Trainee motivation never drops below 70 (capstone)', capstone: true },
+            // Med path — injuries, recovery
+            { id: 'med_basics',    path: 'Med',   cost: 2, name: 'Rehab',              desc: 'Trainee injuries recover 30% faster' },
+            { id: 'med_prevent',   path: 'Med',   cost: 3, name: 'Injury Prevention',  desc: 'Trainee injury chance halved' },
+            { id: 'med_master',    path: 'Med',   cost: 5, name: 'Sports Doctor',      desc: 'Chronic injuries auto-heal over time (capstone)', capstone: true },
+            // Scout path — recruit pipeline
+            { id: 'scout_basics',  path: 'Scout', cost: 2, name: 'Scouting Network',   desc: 'Recruit pool rotates twice as often' },
+            { id: 'scout_quality', path: 'Scout', cost: 3, name: 'Talent Eye',         desc: 'New recruits start with +15% stats' },
+            { id: 'scout_legend',  path: 'Scout', cost: 5, name: 'Talent Magnet',      desc: 'Recruits can roll a legendary tier (capstone)', capstone: true },
+        ];
+
+        // ── Trainee events ──────────────────────────────────────────────────
+        //   Periodic, choice-based moments that mirror life events in the
+        //   player's training. Each requires a coach decision via modal.
+        const TRAINEE_EVENTS = [
+            { id: 'plateau',
+              requires: (t) => t.prCount >= 8 && (Date.now() - (t.lastPRTime || 0)) > 4 * 60 * 1000,
+              text: (t) => `${t.name} hasn't PR'd in a while. They're getting frustrated. What now?`,
+              negative: true,
+              options: [
+                  { label: 'Switch focus to their weakest lift', apply: (t) => { t.focus = weakestLift(t); t.motivation = Math.min(100, t.motivation + 5); } },
+                  { label: 'Mandate a rest week',                apply: (t) => { t.restUntil = Date.now() + 5 * 60 * 1000; t.fatigue = Math.max(0, t.fatigue - 200); } },
+                  { label: 'Stay the course — trust the program', apply: (t) => { t.motivation = Math.max(40, t.motivation - 5); } },
+              ] },
+            { id: 'family',
+              requires: (t) => Math.random() < 0.5,
+              text: (t) => `${t.name} has family stuff pulling them out of the gym this week. They feel guilty.`,
+              negative: true,
+              options: [
+                  { label: 'Tell them to take the time',          apply: (t) => { t.restUntil = Date.now() + 3 * 60 * 1000; t.motivation = Math.min(100, t.motivation + 10); } },
+                  { label: 'Light-duty week — keep coming in',    apply: (t) => { t.intensity = 'easy'; t.motivation = Math.min(100, t.motivation + 3); } },
+                  { label: 'No exceptions — train through it',    apply: (t) => { t.motivation = Math.max(30, t.motivation - 15); t.fatigue = Math.min(1000, t.fatigue + 150); } },
+              ] },
+            { id: 'breakthrough',
+              requires: (t) => t.motivation >= 85 && t.fatigue < 400,
+              text: (t) => `${t.name} feels something clicking. They want to push for a meet.`,
+              negative: false,
+              options: [
+                  { label: 'Send them to a local meet now',       apply: (t) => sendTraineeToMeetAtTier(t.id, 'local') },
+                  { label: 'Bump them to hard intensity',         apply: (t) => { t.intensity = 'hard'; t.motivation = Math.min(100, t.motivation + 5); } },
+                  { label: 'Capture it in a PR session',          apply: (t) => { t.adaptation = (t.adaptation || 0) + 30; t.motivation = Math.min(100, t.motivation + 3); } },
+              ] },
+            { id: 'sponsor',
+              requires: (t) => t.fame >= 40 && !t.sponsor,
+              text: (t) => `A sponsor wants ${t.name}. Coach gets 30% of the deal.`,
+              negative: false,
+              options: [
+                  { label: 'Sign the contract',                   apply: (t) => { t.sponsor = true; gameState.coachMode.fame += 5; gameState.knowledge += 200; } },
+                  { label: 'Decline — focus on the platform',     apply: (t) => { t.motivation = Math.min(100, t.motivation + 5); } },
+              ] },
+            { id: 'rival_poach',
+              requires: (t) => t.fame >= 25 && t.motivation < 80,
+              text: (t) => `Another coach is trying to poach ${t.name}. They want to know if you actually believe in them.`,
+              negative: true,
+              options: [
+                  { label: 'Promise them a National-tier meet',   apply: (t) => { t.peakedFor = 'national'; t.motivation = Math.min(100, t.motivation + 15); } },
+                  { label: 'Let them choose — no hard sell',      apply: (t) => { if (Math.random() < 0.3) { dismissTraineeById(t.id, true); showNotification(`${t.name} left for another coach.`, 'warning'); } else { t.motivation = Math.min(100, t.motivation + 5); } } },
+                  { label: 'Offer a bigger share of meet earnings', apply: (t) => { t.motivation = Math.min(100, t.motivation + 8); gameState.knowledge = Math.max(0, gameState.knowledge - 150); } },
+              ] },
+            { id: 'injury_scare',
+              requires: (t) => t.fatigue > 600,
+              text: (t) => `${t.name} felt something pop in their last set. Probably nothing. Probably.`,
+              negative: true,
+              options: [
+                  { label: 'Get them scanned — sit out a week',   apply: (t) => { t.restUntil = Date.now() + 4 * 60 * 1000; t.fatigue = 0; } },
+                  { label: 'Drop to easy intensity, keep moving', apply: (t) => { t.intensity = 'easy'; t.fatigue = Math.max(0, t.fatigue - 200); } },
+                  { label: 'It\'s nothing — full program',         apply: (t) => { if (Math.random() < 0.5) { t.chronicInjury = { lift: weakestLift(t), since: Date.now() }; showNotification(`${t.name} picked up a chronic ${t.chronicInjury.lift} injury.`, 'danger'); } } },
+              ] },
+        ];
+
+        // Tier definitions for trainee meets. Higher tier = bigger reward but
+        // harder; can be used as a graduation goal.
+        const TRAINEE_MEET_TIERS = [
+            { id: 'local',    name: 'Local',    minTotal: 200, kReward:   60, fameReward:  5, baseChance: 0.78, coachPoints: 0 },
+            { id: 'regional', name: 'Regional', minTotal: 320, kReward:  200, fameReward: 12, baseChance: 0.55, coachPoints: 0 },
+            { id: 'national', name: 'National', minTotal: 430, kReward:  600, fameReward: 30, baseChance: 0.40, coachPoints: 1 },
+            { id: 'world',    name: 'World',    minTotal: 550, kReward: 1400, fameReward: 70, baseChance: 0.25, coachPoints: 2 },
+        ];
+
+        function weakestLift(t) {
+            const arr = [['squat', t.squat], ['bench', t.bench], ['deadlift', t.deadlift]];
+            arr.sort((a, b) => a[1] - b[1]);
+            return arr[0][0];
+        }
+        function strongestLift(t) {
+            const arr = [['squat', t.squat], ['bench', t.bench], ['deadlift', t.deadlift]];
+            arr.sort((a, b) => b[1] - a[1]);
+            return arr[0][0];
+        }
+        function capCase(s) { return s.charAt(0).toUpperCase() + s.slice(1); }
+
+        // ── Coach Skill Tree helpers ────────────────────────────────────────
+        function hasCoachSkill(id) {
+            const cm = gameState.coachMode;
+            return !!(cm && cm.coachSkills && cm.coachSkills[id]);
+        }
+        function getCoachPointsEarned() {
+            const cm = gameState.coachMode;
+            // 2 per graduation, 1 per 3 meet wins (rounded down)
+            return 2 * (cm.graduated || 0) + Math.floor((cm.meetWins || 0) / 3);
+        }
+        function getCoachPointsAvailable() {
+            const cm = gameState.coachMode;
+            return Math.max(0, getCoachPointsEarned() - (cm.coachSkillPointsSpent || 0));
+        }
+        function canBuyCoachSkill(skill) {
+            if (hasCoachSkill(skill.id)) return false;
+            if (getCoachPointsAvailable() < skill.cost) return false;
+            if (skill.capstone) {
+                const owned = COACH_SKILLS.filter(s => s.path === skill.path && !s.capstone && hasCoachSkill(s.id));
+                if (owned.length < 2) return false;
+            }
+            return true;
+        }
+        function buyCoachSkill(id) {
+            const cm = gameState.coachMode;
+            const skill = COACH_SKILLS.find(s => s.id === id);
+            if (!skill || !canBuyCoachSkill(skill)) return;
+            if (!cm.coachSkills) cm.coachSkills = {};
+            cm.coachSkills[id] = true;
+            cm.coachSkillPointsSpent = (cm.coachSkillPointsSpent || 0) + skill.cost;
+            addJournalEntry(`Coach skill: ${skill.name}. ${skill.desc}.`);
+            showNotification(`Coach: learned ${skill.name}`, 'pr');
+            renderCoachSkillTree();
+            renderCoachMode();
+            saveGame();
+        }
+
+        // Trainee bonus modifiers from coach skills
+        function getTraineeGrowthMult() {
+            let m = 1;
+            if (hasCoachSkill('sc_basics')) m *= 1.10;
+            if (hasCoachSkill('sc_master')) m *= 1.25;
+            return m;
+        }
+        function getTraineeInjuryMult() {
+            return hasCoachSkill('med_prevent') ? 0.5 : 1;
+        }
+        function getTraineeMotivFloor() {
+            if (hasCoachSkill('psy_master')) return 70;
+            if (hasCoachSkill('psy_basics')) return 60;
+            return 50;
+        }
+
+        // ── Trainee normalization (back-compat for older saves) ─────────────
+        function normalizeTrainee(t) {
+            if (t.age === undefined)         t.age = 18 + Math.floor(Math.random() * 16);
+            if (!t.personality)              t.personality = PERSONALITY_KEYS[Math.floor(Math.random() * PERSONALITY_KEYS.length)];
+            if (t.techSquat === undefined)    t.techSquat = t.technique || 50;
+            if (t.techBench === undefined)    t.techBench = t.technique || 50;
+            if (t.techDeadlift === undefined) t.techDeadlift = t.technique || 50;
+            if (!t.intensity)                 t.intensity = 'normal';
+            if (t.adaptation === undefined)   t.adaptation = 0;
+            if (t.fatigue === undefined)      t.fatigue = 0;
+            if (t.restUntil === undefined)    t.restUntil = 0;
+            if (t.accessoryUntil === undefined) t.accessoryUntil = 0;
+            if (!t.injuries)                  t.injuries = {};
+            if (t.chronicInjury === undefined) t.chronicInjury = null;
+            if (!t.goal)                      t.goal = { type: 'total', target: 500, label: 'Hit a 500 kg total' };
+            if (t.prCount === undefined)      t.prCount = 0;
+            if (t.eventCooldown === undefined) t.eventCooldown = 180 + Math.random() * 240;
+            if (t.eventPending === undefined) t.eventPending = null;
+            if (t.lastPRTime === undefined)   t.lastPRTime = Date.now();
+            if (t.peakedFor === undefined)    t.peakedFor = null;
+            return t;
+        }
+
+        // ── Recruit generation ─────────────────────────────────────────────
         function generateRecruit() {
             const tpl = TRAINEE_TEMPLATES[Math.floor(Math.random() * TRAINEE_TEMPLATES.length)];
             const first = COACH_FIRST_NAMES[Math.floor(Math.random() * COACH_FIRST_NAMES.length)];
             const last  = COACH_LAST_NAMES[Math.floor(Math.random() * COACH_LAST_NAMES.length)];
-            return {
-                id: 't_' + Date.now() + '_' + Math.floor(Math.random() * 1000),
+            const personality = PERSONALITY_KEYS[Math.floor(Math.random() * PERSONALITY_KEYS.length)];
+            let scale = 1;
+            if (hasCoachSkill('scout_quality')) scale = 1.15;
+            let legendary = false;
+            if (hasCoachSkill('scout_legend') && Math.random() < 0.07) {
+                legendary = true;
+                scale *= 1.40;
+            }
+            const t = {
+                id: 't_' + Date.now() + '_' + Math.floor(Math.random() * 10000),
                 name: `${first} ${last}`,
-                archetype: tpl.archetype, bias: tpl.bias, flavor: tpl.flavor,
-                squat: tpl.sq, bench: tpl.bn, deadlift: tpl.dl,
-                technique: tpl.tech, motivation: 90,
-                focus: tpl.bias,         // default focus matches archetype's bias
-                fame: 0, meetCooldown: 0,
-                meetsWon: 0, meetsLost: 0,
+                archetype: legendary ? `Legendary ${tpl.archetype}` : tpl.archetype,
+                bias: tpl.bias,
+                flavor: legendary ? `once-in-a-decade ${tpl.archetype.toLowerCase()} — federations already watching` : tpl.flavor,
+                age: 18 + Math.floor(Math.random() * 16),
+                personality,
+                squat: Math.floor(tpl.sq * scale),
+                bench: Math.floor(tpl.bn * scale),
+                deadlift: Math.floor(tpl.dl * scale),
+                technique: tpl.tech,
+                techSquat: tpl.tech, techBench: tpl.tech, techDeadlift: tpl.tech,
+                motivation: 90,
+                focus: tpl.bias,
+                intensity: 'normal',
+                adaptation: 0, fatigue: 0,
+                restUntil: 0, accessoryUntil: 0,
+                injuries: {}, chronicInjury: null,
+                fame: 0, meetCooldown: 0, meetsWon: 0, meetsLost: 0,
+                goal: { ...tpl.goal },
+                prCount: 0,
+                eventCooldown: 120 + Math.random() * 240,
+                eventPending: null,
+                peakedFor: null,
+                lastPRTime: Date.now(),
                 since: Date.now(),
+                legendary,
             };
+            return t;
         }
 
         function refreshCoachRecruitPool(force) {
             const cm = gameState.coachMode;
             if (!cm.unlocked) return;
             if (!force && cm.recruitPool.length >= 3) return;
-            // Add up to 3 recruits in the pool
-            while (cm.recruitPool.length < 3) {
-                cm.recruitPool.push(generateRecruit());
-            }
+            while (cm.recruitPool.length < 3) cm.recruitPool.push(generateRecruit());
         }
 
+        // ── Roster controls ────────────────────────────────────────────────
         function recruitTrainee(idx) {
             const cm = gameState.coachMode;
             if (!cm.unlocked) return;
             if (cm.trainees.length >= cm.maxRoster) {
-                showNotification(`Roster is full — current cap is ${cm.maxRoster}`, 'warning');
+                showNotification(`Roster full (cap ${cm.maxRoster})`, 'warning');
                 return;
             }
             const recruit = cm.recruitPool[idx];
             if (!recruit) return;
             cm.recruitPool.splice(idx, 1);
             cm.trainees.push(recruit);
-            addJournalEntry(`Signed ${recruit.name} (${recruit.archetype}) to the roster. ${recruit.flavor}.`);
+            addJournalEntry(`Signed ${recruit.name} (${recruit.archetype}). ${recruit.flavor}.`);
             showNotification(`Signed ${recruit.name}`, 'pr');
             checkAchievements();
             renderCoachMode(); updateUI(); saveGame();
         }
-
-        function dismissTraineeById(id) {
+        function dismissTraineeById(id, silent) {
             const cm = gameState.coachMode;
             const t = cm.trainees.find(x => x.id === id);
             if (!t) return;
             cm.trainees = cm.trainees.filter(x => x.id !== id);
-            addJournalEntry(`Released ${t.name} from the roster. They'll catch on somewhere.`);
-            renderCoachMode(); updateUI(); saveGame();
+            if (!silent) {
+                addJournalEntry(`Released ${t.name} from the roster.`);
+                renderCoachMode(); updateUI(); saveGame();
+            }
         }
-
         function setTraineeFocus(id, focus) {
-            const cm = gameState.coachMode;
-            const t = cm.trainees.find(x => x.id === id);
+            const t = gameState.coachMode.trainees.find(x => x.id === id);
             if (!t) return;
             t.focus = focus;
             renderCoachMode();
         }
+        function setTraineeIntensity(id, intensity) {
+            const t = gameState.coachMode.trainees.find(x => x.id === id);
+            if (!t) return;
+            t.intensity = intensity;
+            renderCoachMode();
+        }
+        function restWeekTrainee(id) {
+            const t = gameState.coachMode.trainees.find(x => x.id === id);
+            if (!t) return;
+            if (t.restUntil > Date.now()) { showNotification('Already on rest week', 'warning'); return; }
+            const dur = hasCoachSkill('sc_period') ? 4 * 60 * 1000 : 5 * 60 * 1000;
+            t.restUntil = Date.now() + dur;
+            const drop = hasCoachSkill('sc_period') ? 1.5 : 1;
+            t.fatigue = Math.max(0, t.fatigue * (1 - 0.6 * drop));
+            t.motivation = Math.min(100, t.motivation + 8);
+            addJournalEntry(`${t.name} on rest week. Fatigue cleared.`);
+            renderCoachMode(); saveGame();
+        }
+        function doTraineeAccessory(id) {
+            const t = gameState.coachMode.trainees.find(x => x.id === id);
+            if (!t) return;
+            if (t.accessoryUntil > Date.now()) { showNotification('Accessory work already running', 'warning'); return; }
+            t.accessoryUntil = Date.now() + 4 * 60 * 1000; // 4 minute window
+            const weak = weakestLift(t);
+            addJournalEntry(`${t.name} is doing accessory work on ${weak}.`);
+            showNotification(`${t.name} addressing ${weak} weakness`, 'success');
+            renderCoachMode(); saveGame();
+        }
+        function treatTraineeChronic(id) {
+            const t = gameState.coachMode.trainees.find(x => x.id === id);
+            if (!t || !t.chronicInjury) return;
+            const lift = t.chronicInjury.lift;
+            t.chronicInjury = null;
+            t.fatigue = Math.max(0, t.fatigue - 200);
+            t.restUntil = Date.now() + 3 * 60 * 1000; // forced rest
+            addJournalEntry(`Treated ${t.name}'s chronic ${lift} injury.`);
+            showNotification(`${t.name} healing — 3 min forced rest`, 'success');
+            renderCoachMode(); saveGame();
+        }
 
-        function sendTraineeToMeet(id) {
+        // ── Goal evaluation ────────────────────────────────────────────────
+        function checkTraineeGoal(t) {
+            const g = t.goal;
+            if (!g) return false;
+            if (g.type === 'total')    return (t.squat + t.bench + t.deadlift) >= g.target;
+            if (g.type === 'lift')     return t[g.lift] >= g.target;
+            if (g.type === 'meetTier') {
+                // Goal completed when the trainee has won at least one meet at this tier.
+                const wins = (t.meetTierWins && t.meetTierWins[g.tier]) || 0;
+                return wins >= 1;
+            }
+            return false;
+        }
+
+        // ── Tiered meet system ─────────────────────────────────────────────
+        function getTraineeMeetChance(t, tier) {
+            const total = t.squat + t.bench + t.deadlift;
+            const techAvg = (t.techSquat + t.techBench + t.techDeadlift) / 3;
+            const moti = t.motivation / 100;
+            const fatiguePenal = Math.max(0, (t.fatigue - 500) / 1000);
+            const peakBonus = t.peakedFor === tier.id ? 0.10 : 0;
+            let chance = tier.baseChance
+                       + (techAvg - 50) * 0.004
+                       + Math.max(-0.2, Math.min(0.3, (total - tier.minTotal) / tier.minTotal * 0.25))
+                       + (moti - 0.7) * 0.2
+                       - fatiguePenal
+                       + peakBonus;
+            return Math.max(0.03, Math.min(0.97, chance));
+        }
+        function sendTraineeToMeetAtTier(id, tierId) {
             const cm = gameState.coachMode;
             const t = cm.trainees.find(x => x.id === id);
-            if (!t) return;
+            const tier = TRAINEE_MEET_TIERS.find(x => x.id === tierId);
+            if (!t || !tier) return;
             const total = t.squat + t.bench + t.deadlift;
-            if (total < 200) {
-                showNotification(`${t.name} isn't ready (need 200 kg total)`, 'warning');
+            if (total < tier.minTotal) {
+                showNotification(`${t.name} isn't ready for ${tier.name} (needs ${tier.minTotal} kg)`, 'warning');
                 return;
             }
             if (t.meetCooldown > 0) {
-                const m = Math.floor(t.meetCooldown / 60), s = Math.floor(t.meetCooldown % 60);
-                showNotification(`${t.name} is recovering — ${m}:${s.toString().padStart(2,'0')} remaining`, 'warning');
+                showNotification(`${t.name} is still recovering`, 'warning');
                 return;
             }
-            // Simulated success — base chance from technique + total relative to roster average
-            const baseChance = Math.min(0.92, 0.35 + (t.technique / 100) * 0.35 + (total / 800) * 0.2);
-            const win = Math.random() < baseChance;
-            t.meetCooldown = 600; // 10 minutes recovery
+            const chance = getTraineeMeetChance(t, tier);
+            const win = Math.random() < chance;
+            // Cooldown scales with tier
+            t.meetCooldown = tier.id === 'local' ? 240 : tier.id === 'regional' ? 480 : tier.id === 'national' ? 900 : 1500;
+            t.fatigue = Math.min(1000, t.fatigue + (tier.id === 'world' ? 350 : tier.id === 'national' ? 220 : tier.id === 'regional' ? 140 : 80));
+            t.peakedFor = null;
             if (win) {
                 t.meetsWon = (t.meetsWon || 0) + 1;
+                if (!t.meetTierWins) t.meetTierWins = {};
+                t.meetTierWins[tier.id] = (t.meetTierWins[tier.id] || 0) + 1;
                 cm.meetWins++;
-                t.fame += 10;
-                cm.fame += 5;
-                const kBonus = 40 + Math.floor(total / 8);
-                gameState.knowledge += kBonus;
+                t.fame += tier.fameReward;
+                cm.fame += Math.floor(tier.fameReward / 2);
+                const k = tier.kReward + Math.floor(total / 8);
+                gameState.knowledge += k;
                 t.motivation = Math.min(100, t.motivation + 10);
-                addJournalEntry(`${t.name} won a meet — ${total} kg total. Your name on the wins board too. +${kBonus} K.`);
-                showNotification(`${t.name} won the meet · +${kBonus} K · +5 coach fame`, 'pr');
+                addJournalEntry(`${t.name} won a ${tier.name} meet (${total} kg). +${k} K, +${tier.fameReward} fame.`);
+                showNotification(`${t.name} won the ${tier.name} meet · +${k} K`, 'pr', 5000);
             } else {
                 t.meetsLost = (t.meetsLost || 0) + 1;
-                t.fame = Math.max(0, t.fame - 3);
-                t.motivation = Math.max(40, t.motivation - 15);
-                addJournalEntry(`${t.name} bombed the meet. You'll fix what you saw.`);
-                showNotification(`${t.name} lost the meet`, 'warning');
+                t.fame = Math.max(0, t.fame - Math.floor(tier.fameReward / 4));
+                t.motivation = Math.max(35, t.motivation - 12);
+                addJournalEntry(`${t.name} lost their ${tier.name} meet. You'll fix what you saw.`);
+                showNotification(`${t.name} lost the ${tier.name} meet`, 'warning');
             }
             checkAchievements();
             renderCoachMode(); updateUI(); saveGame();
+        }
+        // Legacy alias for any external caller
+        function sendTraineeToMeet(id) { sendTraineeToMeetAtTier(id, 'local'); }
+
+        // ── Trainee events ─────────────────────────────────────────────────
+        function tryFireTraineeEvent(t) {
+            const cm = gameState.coachMode;
+            if (cm.activeEventTrainee) return; // one at a time
+            // psy_handle reduces negative event rate
+            const eligible = TRAINEE_EVENTS.filter(e => {
+                if (hasCoachSkill('psy_handle') && e.negative && Math.random() < 0.5) return false;
+                try { return e.requires(t); } catch (err) { return false; }
+            });
+            if (eligible.length === 0) return;
+            const evt = eligible[Math.floor(Math.random() * eligible.length)];
+            t.eventPending = { id: evt.id };
+            cm.activeEventTrainee = t.id;
+            showTraineeEventModal(t);
+        }
+        function showTraineeEventModal(t) {
+            const modal = document.getElementById('traineeEventModal');
+            const content = document.getElementById('traineeEventContent');
+            if (!modal || !content) return;
+            const evt = TRAINEE_EVENTS.find(e => e.id === t.eventPending.id);
+            if (!evt) return;
+            content.innerHTML = `
+                <div style="font-size:11px;color:#888;text-transform:uppercase;letter-spacing:1px;margin-bottom:4px;">Coach decision · ${t.archetype}</div>
+                <h3 style="color:#FFD700;margin-bottom:10px;">${t.name}</h3>
+                <p style="color:#ddd;margin-bottom:14px;font-size:13px;line-height:1.45;">${evt.text(t)}</p>
+                ${evt.options.map((o, i) => `<button class="btn ${o.label.includes('No exceptions')||o.label.includes('Decline')||o.label.includes('Stay')?'btn-warning':'btn-primary'}" style="width:100%;margin-bottom:6px;padding:8px;font-size:12px;text-align:left;" onclick="resolveTraineeEvent('${t.id}', ${i})">${o.label}</button>`).join('')}
+            `;
+            modal.classList.add('active');
+        }
+        function resolveTraineeEvent(traineeId, optionIdx) {
+            const cm = gameState.coachMode;
+            const t = cm.trainees.find(x => x.id === traineeId);
+            if (!t || !t.eventPending) {
+                const modal = document.getElementById('traineeEventModal');
+                if (modal) modal.classList.remove('active');
+                cm.activeEventTrainee = null;
+                return;
+            }
+            const evt = TRAINEE_EVENTS.find(e => e.id === t.eventPending.id);
+            if (evt && evt.options[optionIdx]) {
+                try { evt.options[optionIdx].apply(t); } catch (e) { console.warn(e); }
+            }
+            t.eventPending = null;
+            cm.activeEventTrainee = null;
+            cm.eventsResolved = (cm.eventsResolved || 0) + 1;
+            const modal = document.getElementById('traineeEventModal');
+            if (modal) modal.classList.remove('active');
+            checkAchievements();
+            renderCoachMode(); saveGame();
         }
 
         function graduateTrainee(t) {
             const cm = gameState.coachMode;
             cm.trainees = cm.trainees.filter(x => x.id !== t.id);
             cm.graduated++;
-            cm.fame += 25;
-            // Roster cap grows slowly: 2 → 3 (1st), → 4 (3rd), → 5 (6th).
+            cm.fame += 30;
             if (cm.graduated >= 1 && cm.maxRoster < 3) cm.maxRoster = 3;
             if (cm.graduated >= 3 && cm.maxRoster < 4) cm.maxRoster = 4;
             if (cm.graduated >= 6 && cm.maxRoster < 5) cm.maxRoster = 5;
-            const reward = 1000 + 300 * cm.graduated;
+            const reward = 1200 + 350 * cm.graduated + Math.floor(t.fame * 3);
             gameState.knowledge += reward;
-            addJournalEntry(`${t.name} graduated to the pro tier — 500 kg total. They'll thank you in their first interview. +${reward} K.`);
-            showNotification(`${t.name} graduated · +${reward} Knowledge · roster cap ${cm.maxRoster}`, 'pr', 6000);
+            const goalDesc = t.goal && t.goal.label ? ` (goal: "${t.goal.label}")` : '';
+            addJournalEntry(`${t.name} graduated${goalDesc}. The newsletter clipping is on the wall. +${reward} K.`);
+            showNotification(`${t.name} graduated · +${reward} K · roster cap ${cm.maxRoster}`, 'pr', 6000);
+            // Archive into history
+            if (!Array.isArray(cm.history)) cm.history = [];
+            cm.history.unshift({
+                name: t.name, archetype: t.archetype, total: Math.floor(t.squat + t.bench + t.deadlift),
+                fame: Math.floor(t.fame), goal: t.goal && t.goal.label, at: Date.now()
+            });
+            if (cm.history.length > 50) cm.history.length = 50;
             checkAchievements();
         }
 
+        // ── Deep tick loop ─────────────────────────────────────────────────
         function tickCoachMode(delta) {
             const cm = gameState.coachMode;
             if (!cm.unlocked) return;
-            // Coach skill: scales with player's mastery, legacy, prestige count.
-            const coachSkill = 0.6
+            const now = Date.now();
+
+            // Coach skill baseline from player progression
+            const baseCoachSkill = 0.6
                 + ((gameState.legacy && gameState.legacy.legacyTier) || 0) * 0.10
                 + (gameState.masteryRanks ? (gameState.masteryRanks.squat + gameState.masteryRanks.bench + gameState.masteryRanks.deadlift) * 0.02 : 0)
                 + Math.min(0.5, (gameState.prestigeCount || 1) * 0.02);
-            // Each trainee grows by ~0.06 kg/sec total, scaled by coach skill & their motivation/technique.
-            // Iterate a snapshot so graduateTrainee mutating cm.trainees mid-loop doesn't skip anyone.
-            const traineeSnapshot = cm.trainees.slice();
-            traineeSnapshot.forEach(t => {
-                if (!cm.trainees.includes(t)) return; // already removed (graduated/dismissed)
-                const dist = FOCUS_WEIGHTS[t.focus] || FOCUS_WEIGHTS.balanced;
-                const sum = dist[0] + dist[1] + dist[2];
-                const motivationMult = 0.6 + (t.motivation / 100) * 0.6; // 0.6–1.2×
-                const technMult      = 0.7 + (t.technique  / 100) * 0.5; // 0.7–1.2×
-                const rate = 0.06 * coachSkill * motivationMult * technMult;
-                t.squat    += rate * delta * (dist[0] / sum);
-                t.bench    += rate * delta * (dist[1] / sum);
-                t.deadlift += rate * delta * (dist[2] / sum);
-                t.technique = Math.min(100, t.technique + delta * 0.015 * coachSkill);
+
+            const growthMult = getTraineeGrowthMult();
+            const injuryMult = getTraineeInjuryMult();
+            const motivFloor = getTraineeMotivFloor();
+            const medMaster = hasCoachSkill('med_master');
+            const psyMaster = hasCoachSkill('psy_master');
+            const medBasics = hasCoachSkill('med_basics');
+
+            const snapshot = cm.trainees.slice();
+            snapshot.forEach(t => {
+                if (!cm.trainees.includes(t)) return;
+                normalizeTrainee(t);
+
+                // Tick injury cooldowns regardless
                 if (t.meetCooldown > 0) t.meetCooldown = Math.max(0, t.meetCooldown - delta);
-                // Slow motivation drift toward 70 (no PR clicks here)
-                if (t.motivation > 70) t.motivation = Math.max(70, t.motivation - 0.02 * delta);
-                else if (t.motivation < 70) t.motivation = Math.min(70, t.motivation + 0.02 * delta);
-                // Passive Knowledge income for the coach
-                gameState.knowledge += (0.03 + cm.graduated * 0.01) / 60 * delta;
-                // Auto-graduate at 500 kg total
-                if (t.squat + t.bench + t.deadlift >= 500) graduateTrainee(t);
+                ['squat','bench','deadlift'].forEach(l => {
+                    if ((t.injuries[l] || 0) > 0) t.injuries[l] = Math.max(0, t.injuries[l] - delta * (medBasics ? 1.3 : 1));
+                });
+                // Chronic auto-heal (capstone): 5 min real-time
+                if (medMaster && t.chronicInjury && now - t.chronicInjury.since > 5 * 60 * 1000) {
+                    t.chronicInjury = null;
+                }
+
+                // Rest week: no training, fast recovery
+                if (t.restUntil > now) {
+                    const restRate = 0.5 * (hasCoachSkill('sc_period') ? 1.5 : 1);
+                    t.fatigue = Math.max(0, t.fatigue - restRate * delta);
+                    t.motivation = Math.max(motivFloor, t.motivation - 0.02 * delta);
+                    return;
+                }
+
+                // Intensity multiplier
+                const intensityFactor = t.intensity === 'easy' ? 0.7 : t.intensity === 'hard' ? 1.30 : 1.0;
+                const fatigueFactor   = t.intensity === 'easy' ? 0.5 : t.intensity === 'hard' ? 1.6  : 1.0;
+
+                // Personality and age
+                const pInfo = PERSONALITY_INFO[t.personality] || {};
+                const personalityGrowth = pInfo.growthMult || 1;
+                const ageMult = Math.max(0.7, Math.min(1.2, (32 - Math.max(18, t.age)) / 14 + 0.9));
+
+                // Motivation and tech multipliers
+                const motivationMult = 0.6 + (t.motivation / 100) * 0.6;
+                const avgTech = (t.techSquat + t.techBench + t.techDeadlift) / 3;
+                const techMult = 0.7 + (avgTech / 100) * 0.5;
+
+                // Fatigue penalty (high fatigue slows growth)
+                const fatiguePenalty = Math.max(0.3, 1 - t.fatigue / 1400);
+
+                // Fatigue ticks up (build) and down (recovery)
+                const fatigueBuild = 0.55 * fatigueFactor;
+                const fatigueRecover = 0.2 * (medBasics ? 1.3 : 1);
+                t.fatigue = Math.max(0, Math.min(1000, t.fatigue + (fatigueBuild - fatigueRecover) * delta));
+
+                // Compute growth rate (kg/sec equivalent before adaptation)
+                const rate = 0.085 * baseCoachSkill * growthMult * personalityGrowth * ageMult
+                           * motivationMult * fatiguePenalty * techMult * intensityFactor;
+
+                // Accumulate adaptation; convert when full → PR on weighted random lift
+                t.adaptation = (t.adaptation || 0) + rate * delta;
+                const adaptCost = 4 + Math.max(0, (t.squat + t.bench + t.deadlift - 200) / 25);
+                let safety = 30;
+                while (t.adaptation >= adaptCost && safety-- > 0) {
+                    t.adaptation -= adaptCost;
+                    // Pick lift weighted by focus + accessory bias
+                    const dist = (FOCUS_WEIGHTS[t.focus] || FOCUS_WEIGHTS.balanced).slice();
+                    if (t.accessoryUntil > now) {
+                        const weak = weakestLift(t);
+                        const idx = ['squat','bench','deadlift'].indexOf(weak);
+                        if (idx >= 0) dist[idx] *= 1.6;
+                    }
+                    const dsum = dist[0] + dist[1] + dist[2];
+                    let r = Math.random() * dsum;
+                    let lift = 'squat';
+                    const ll = ['squat','bench','deadlift'];
+                    for (let i = 0; i < ll.length; i++) {
+                        if (r <= dist[i]) { lift = ll[i]; break; }
+                        r -= dist[i];
+                    }
+
+                    // Injury check (acute or chronic)
+                    if ((t.injuries[lift] || 0) > 0) continue;
+                    const injChance = (t.fatigue > 750 ? (t.fatigue - 750) / 2000 : 0) * injuryMult * (pInfo.injuryMult || 1);
+                    if (Math.random() < injChance) {
+                        if (t.fatigue > 900 && !t.chronicInjury && Math.random() < 0.25) {
+                            t.chronicInjury = { lift, since: now };
+                            addJournalEntry(`${t.name} picked up a chronic ${lift} injury.`);
+                            showNotification(`${t.name}: chronic ${lift} injury`, 'danger', 5000);
+                        } else {
+                            t.injuries[lift] = 180;
+                        }
+                        continue;
+                    }
+
+                    // Apply gain
+                    let gain = 1.5 + Math.random() * 1.6;
+                    if (t.accessoryUntil > now && lift === weakestLift(t)) gain *= 1.25;
+                    if (t.chronicInjury && t.chronicInjury.lift === lift) gain *= 0.7;
+                    if (t.legendary) gain *= 1.10;
+                    t[lift] += gain;
+                    t.prCount++;
+                    t.lastPRTime = now;
+                    // Per-lift technique
+                    const techKey = 'tech' + capCase(lift);
+                    t[techKey] = Math.min(100, t[techKey] + 0.4);
+                    t.technique = (t.techSquat + t.techBench + t.techDeadlift) / 3;
+                    // Motivation bump
+                    t.motivation = Math.min(100, t.motivation + 1.5);
+                }
+
+                // Motivation drift toward floor
+                const flr = Math.max(motivFloor, pInfo.motivBoost ? motivFloor + pInfo.motivBoost : motivFloor);
+                if (t.motivation > 75) t.motivation = Math.max(75, t.motivation - 0.015 * delta);
+                else if (t.motivation < flr) t.motivation = Math.min(flr, t.motivation + 0.01 * delta);
+
+                // Passive Knowledge for the coach
+                gameState.knowledge += (0.05 + cm.graduated * 0.012) / 60 * delta;
+
+                // Event ticker
+                t.eventCooldown = (t.eventCooldown || 0) - delta;
+                if (t.eventCooldown <= 0 && !t.eventPending && !cm.activeEventTrainee) {
+                    tryFireTraineeEvent(t);
+                    t.eventCooldown = 180 + Math.random() * 300; // 3–8 min before next attempt
+                }
+
+                // Goal completion → graduation
+                if (checkTraineeGoal(t)) {
+                    graduateTrainee(t);
+                    return;
+                }
             });
-            // Coach fame ticks up slowly while you have anyone training
-            if (cm.trainees.length > 0) cm.fame += 0.001 * delta * cm.trainees.length;
-            // Rotate recruit pool periodically — force replacement so the same names
-            // don't sit there forever once the pool is full.
+
+            // Coach fame drift up
+            if (cm.trainees.length > 0) cm.fame += 0.002 * delta * cm.trainees.length;
+            // Recruit pool rotation
+            const rotateEvery = hasCoachSkill('scout_basics') ? 150 : 300;
             cm.nextRecruitTimer -= delta;
             if (cm.nextRecruitTimer <= 0) {
                 cm.recruitPool = [];
                 refreshCoachRecruitPool();
-                cm.nextRecruitTimer = 300; // 5 min
+                cm.nextRecruitTimer = rotateEvery;
             }
         }
 
-        // Migrate existing single apprentice into Coach Mode roster on unlock.
+        // ── Migration on first unlock ──────────────────────────────────────
         function migrateApprenticeToCoachMode() {
             if (!gameState.apprentice) return;
             const a = gameState.apprentice;
             const cm = gameState.coachMode;
-            cm.trainees.push({
+            const migrated = {
                 id: 't_migrated_' + Date.now(),
                 name: a.name + ' (your last apprentice)',
-                archetype: 'Apprentice', bias: a.focus || 'balanced', flavor: 'the lifter you were mentoring when the coaching offer came in',
+                archetype: 'Apprentice',
+                bias: a.focus || 'balanced',
+                flavor: 'the lifter you were mentoring when the coaching offer came in',
                 squat: a.squat, bench: a.bench, deadlift: a.deadlift,
-                technique: a.technique || 50, motivation: 80,
+                technique: a.technique || 50,
+                motivation: 80,
                 focus: a.focus || 'balanced',
-                fame: 0, meetCooldown: 0,
-                meetsWon: 0, meetsLost: 0,
+                fame: 0, meetCooldown: 0, meetsWon: 0, meetsLost: 0,
                 since: a.since || Date.now(),
-            });
+            };
+            normalizeTrainee(migrated);
+            cm.trainees.push(migrated);
             gameState.apprentice = null;
         }
-
         function unlockCoachModeOnce() {
             const cm = gameState.coachMode;
             if (cm.unlocked) return;
@@ -6228,6 +6740,167 @@
             refreshCoachRecruitPool(true);
         }
 
+        // ── Coach Skill Tree modal ─────────────────────────────────────────
+        function openCoachSkillTreeModal() {
+            const modal = document.getElementById('coachSkillTreeModal');
+            if (!modal) return;
+            renderCoachSkillTree();
+            modal.classList.add('active');
+        }
+        function closeCoachSkillTreeModal() {
+            const modal = document.getElementById('coachSkillTreeModal');
+            if (modal) modal.classList.remove('active');
+        }
+        function renderCoachSkillTree() {
+            const el = document.getElementById('coachSkillTreeContent');
+            if (!el) return;
+            const earned = getCoachPointsEarned();
+            const avail = getCoachPointsAvailable();
+            const spent = (gameState.coachMode.coachSkillPointsSpent || 0);
+            const pathColor = { 'S&C': '#4CAF50', 'Mind': '#2196F3', 'Med': '#F44336', 'Scout': '#FFC107' };
+            let html = `<div style="display:flex;justify-content:space-between;align-items:baseline;margin-bottom:10px;font-size:12px;color:#aaa;">
+                <span>Coach Points: <strong style="color:#FFD700;">${avail}</strong> available · ${spent} spent · ${earned} earned</span>
+                <span style="font-size:11px;color:#888;">+2 per graduation · +1 per 3 meet wins</span>
+            </div>`;
+            ['S&C','Mind','Med','Scout'].forEach(path => {
+                html += `<div style="margin-bottom:10px;">
+                    <div style="color:${pathColor[path]};font-weight:bold;font-size:12px;text-transform:uppercase;letter-spacing:1px;margin-bottom:6px;">${path} Path</div>
+                    <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(180px,1fr));gap:6px;">`;
+                COACH_SKILLS.filter(s => s.path === path).forEach(s => {
+                    const owned = hasCoachSkill(s.id);
+                    const buyable = canBuyCoachSkill(s);
+                    const cap = s.capstone ? ' · CAPSTONE' : '';
+                    html += `<div style="background:${owned?'#0f1a0f':'#1a1a1a'};border:1px solid ${owned?'#2a6a2a':'#333'};border-left:3px solid ${pathColor[path]};border-radius:6px;padding:8px;">
+                        <div style="font-size:12px;font-weight:bold;color:${owned?'#8fd88f':'#ddd'};">${owned?'✓ ':''}${s.name}<span style="font-size:9px;color:#888;">${cap}</span></div>
+                        <div style="font-size:11px;color:#888;margin:3px 0;">${s.desc}</div>
+                        ${owned
+                            ? `<div style="font-size:10px;color:#8fd88f;">LEARNED</div>`
+                            : `<button class="btn btn-primary" style="padding:3px 8px;font-size:11px;width:100%;margin-top:3px;" onclick="buyCoachSkill('${s.id}')" ${buyable?'':'disabled'}>Learn (${s.cost} CP)</button>`}
+                    </div>`;
+                });
+                html += `</div></div>`;
+            });
+            el.innerHTML = html;
+        }
+
+        // ── Trainee detail modal ───────────────────────────────────────────
+        function openTraineeDetailModal(id) {
+            const cm = gameState.coachMode;
+            const t = cm.trainees.find(x => x.id === id);
+            if (!t) return;
+            cm.detailTraineeId = id;
+            renderTraineeDetail();
+            document.getElementById('traineeDetailModal').classList.add('active');
+        }
+        function closeTraineeDetailModal() {
+            gameState.coachMode.detailTraineeId = null;
+            document.getElementById('traineeDetailModal').classList.remove('active');
+        }
+        function renderTraineeDetail() {
+            const el = document.getElementById('traineeDetailContent');
+            if (!el) return;
+            const cm = gameState.coachMode;
+            const t = cm.trainees.find(x => x.id === cm.detailTraineeId);
+            if (!t) { el.innerHTML = ''; return; }
+            normalizeTrainee(t);
+            const total = Math.floor(t.squat + t.bench + t.deadlift);
+            const pInfo = PERSONALITY_INFO[t.personality] || {};
+            const now = Date.now();
+            const restingFor = Math.max(0, Math.ceil((t.restUntil - now) / 1000));
+            const accessoryFor = Math.max(0, Math.ceil((t.accessoryUntil - now) / 1000));
+            const fmtMs = s => `${Math.floor(s/60)}:${(s%60).toString().padStart(2,'0')}`;
+            const goalProgress = (() => {
+                const g = t.goal; if (!g) return '—';
+                if (g.type === 'total') return `${total} / ${g.target} kg`;
+                if (g.type === 'lift') return `${Math.floor(t[g.lift])} / ${g.target} kg ${g.lift}`;
+                if (g.type === 'meetTier') return `${(t.meetTierWins && t.meetTierWins[g.tier]) || 0} / 1 ${g.tier} win`;
+                return '—';
+            })();
+            el.innerHTML = `
+                <div style="display:flex;justify-content:space-between;align-items:baseline;margin-bottom:6px;">
+                    <div>
+                        <strong style="color:#ddd;font-size:16px;">${t.name}</strong>
+                        <span style="font-size:11px;color:#888;margin-left:8px;">${t.archetype} · age ${t.age} · ${t.personality}</span>
+                    </div>
+                    <span style="font-size:11px;color:#aaa;">Fame ${Math.floor(t.fame)}</span>
+                </div>
+                <div style="font-size:11px;color:#888;font-style:italic;margin-bottom:10px;">${t.flavor}<br><span style="color:#aaa;">${pInfo.desc || ''}</span></div>
+
+                <div style="background:#0f0f1a;border:1px solid #334;border-radius:6px;padding:8px;margin-bottom:10px;">
+                    <div style="font-size:11px;color:#888;text-transform:uppercase;letter-spacing:1px;margin-bottom:4px;">Career goal</div>
+                    <div style="color:#FFD700;font-size:13px;font-weight:bold;">${t.goal ? t.goal.label : '—'}</div>
+                    <div style="color:#aaa;font-size:11px;margin-top:2px;">Progress: ${goalProgress}</div>
+                </div>
+
+                <div style="display:grid;grid-template-columns:repeat(3,1fr);gap:6px;margin-bottom:8px;">
+                    ${['squat','bench','deadlift'].map(l => {
+                        const v = Math.floor(t[l]); const tech = Math.floor(t['tech' + capCase(l)]);
+                        const inj = t.injuries[l] > 0;
+                        const chronic = t.chronicInjury && t.chronicInjury.lift === l;
+                        const color = { squat: '#2196F3', bench: '#4CAF50', deadlift: '#FF5722' }[l];
+                        return `<div style="background:#1a1a2a;border:1px solid #334;border-left:3px solid ${color};border-radius:5px;padding:6px;">
+                            <div style="font-size:10px;color:#888;text-transform:uppercase;">${l}</div>
+                            <div style="font-size:18px;color:${color};font-weight:bold;">${v}</div>
+                            <div style="font-size:10px;color:#aaa;">Tech ${tech}</div>
+                            ${inj ? `<div style="font-size:10px;color:#f88;">⚠ Injured</div>` : ''}
+                            ${chronic ? `<div style="font-size:10px;color:#d44;">⚠ Chronic</div>` : ''}
+                        </div>`;
+                    }).join('')}
+                </div>
+
+                <div style="font-size:11px;color:#aaa;margin-bottom:10px;">
+                    Total <strong style="color:#ddd;">${total} kg</strong> ·
+                    Motivation <strong style="color:#ddd;">${Math.floor(t.motivation)}</strong> ·
+                    Fatigue <strong style="color:#ddd;">${Math.floor(t.fatigue)}</strong>
+                </div>
+
+                <div style="background:#0a0a14;border-radius:3px;height:6px;overflow:hidden;margin-bottom:10px;">
+                    <div style="background:linear-gradient(90deg,#f44,#FFA000,#4CAF50);height:100%;width:${100 - t.fatigue/10}%;"></div>
+                </div>
+
+                <div style="font-size:11px;color:#888;text-transform:uppercase;letter-spacing:1px;margin-bottom:4px;">Focus</div>
+                <div style="display:grid;grid-template-columns:repeat(4,1fr);gap:3px;margin-bottom:8px;">
+                    ${['balanced','squat','bench','deadlift'].map(f =>
+                        `<button class="btn ${t.focus===f?'btn-success':'btn-primary'}" style="padding:5px;font-size:11px;" onclick="setTraineeFocus('${t.id}','${f}');renderTraineeDetail();">${f}</button>`
+                    ).join('')}
+                </div>
+
+                <div style="font-size:11px;color:#888;text-transform:uppercase;letter-spacing:1px;margin-bottom:4px;">Intensity</div>
+                <div style="display:grid;grid-template-columns:repeat(3,1fr);gap:3px;margin-bottom:10px;">
+                    ${['easy','normal','hard'].map(i =>
+                        `<button class="btn ${t.intensity===i?'btn-success':'btn-primary'}" style="padding:5px;font-size:11px;" onclick="setTraineeIntensity('${t.id}','${i}');renderTraineeDetail();">${i}</button>`
+                    ).join('')}
+                </div>
+
+                <div style="display:grid;grid-template-columns:1fr 1fr;gap:4px;margin-bottom:8px;">
+                    <button class="btn btn-primary" style="padding:6px;font-size:11px;" onclick="restWeekTrainee('${t.id}');renderTraineeDetail();" ${restingFor>0?'disabled':''}>
+                        ${restingFor>0 ? `Resting ${fmtMs(restingFor)}` : 'Rest Week'}
+                    </button>
+                    <button class="btn btn-primary" style="padding:6px;font-size:11px;" onclick="doTraineeAccessory('${t.id}');renderTraineeDetail();" ${accessoryFor>0?'disabled':''}>
+                        ${accessoryFor>0 ? `Accessory ${fmtMs(accessoryFor)}` : 'Accessory Work'}
+                    </button>
+                </div>
+                ${t.chronicInjury ? `<button class="btn btn-warning" style="padding:6px;font-size:11px;width:100%;margin-bottom:8px;" onclick="treatTraineeChronic('${t.id}');renderTraineeDetail();">Treat chronic ${t.chronicInjury.lift} (3 min rest)</button>` : ''}
+
+                <div style="font-size:11px;color:#888;text-transform:uppercase;letter-spacing:1px;margin-bottom:4px;">Send to meet</div>
+                <div style="display:grid;grid-template-columns:repeat(4,1fr);gap:3px;margin-bottom:6px;">
+                    ${TRAINEE_MEET_TIERS.map(tier => {
+                        const ok = total >= tier.minTotal && t.meetCooldown <= 0;
+                        const ch = ok ? Math.round(getTraineeMeetChance(t, tier) * 100) : 0;
+                        const label = ok ? `${tier.name}<br><span style='font-size:9px;opacity:0.7;'>${ch}% chance</span>` : `${tier.name}<br><span style='font-size:9px;opacity:0.6;'>need ${tier.minTotal}kg</span>`;
+                        return `<button class="btn ${ok?'btn-primary':''}" style="padding:5px;font-size:10px;line-height:1.2;" onclick="sendTraineeToMeetAtTier('${t.id}','${tier.id}');renderTraineeDetail();" ${ok?'':'disabled'}>${label}</button>`;
+                    }).join('')}
+                </div>
+                <div style="font-size:10px;color:#888;text-align:center;margin-bottom:8px;">${t.meetCooldown > 0 ? `Recovering for ${fmtMs(Math.ceil(t.meetCooldown))}` : 'Ready'} · Tier wins: ${t.meetTierWins ? Object.entries(t.meetTierWins).map(([k,v])=>k+' '+v).join(' · ') : 'none yet'}</div>
+
+                <div style="display:flex;justify-content:space-between;gap:4px;">
+                    <button class="btn" style="padding:5px;font-size:11px;flex:1;" onclick="closeTraineeDetailModal();">Close</button>
+                    <button class="btn btn-warning" style="padding:5px;font-size:11px;flex:1;" onclick="if(confirm('Release ${t.name}?')) { dismissTraineeById('${t.id}'); closeTraineeDetailModal(); }">Release</button>
+                </div>
+            `;
+        }
+
+        // ── Render: Coach tab ───────────────────────────────────────────────
         function renderCoachMode() {
             const el = document.getElementById('coachTabContent');
             if (!el) return;
@@ -6237,88 +6910,116 @@
                 return;
             }
             refreshCoachRecruitPool();
+            const cpAvail = getCoachPointsAvailable();
+            const now = Date.now();
 
-            let html = `<div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(120px,1fr));gap:8px;margin-bottom:14px;">
-                <div style="background:#1a1a2a;padding:10px;border-radius:6px;text-align:center;">
-                    <div style="font-size:10px;color:#888;text-transform:uppercase;">Coach Fame</div>
-                    <div style="font-size:18px;font-weight:bold;color:#FFD700;">${Math.floor(cm.fame)}</div>
+            let html = `<div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(110px,1fr));gap:6px;margin-bottom:12px;">
+                <div style="background:#1a1a2a;padding:8px;border-radius:6px;text-align:center;">
+                    <div style="font-size:10px;color:#888;text-transform:uppercase;">Fame</div>
+                    <div style="font-size:16px;font-weight:bold;color:#FFD700;">${Math.floor(cm.fame)}</div>
                 </div>
-                <div style="background:#1a1a2a;padding:10px;border-radius:6px;text-align:center;">
+                <div style="background:#1a1a2a;padding:8px;border-radius:6px;text-align:center;">
                     <div style="font-size:10px;color:#888;text-transform:uppercase;">Roster</div>
-                    <div style="font-size:18px;font-weight:bold;color:#ddd;">${cm.trainees.length} / ${cm.maxRoster}</div>
+                    <div style="font-size:16px;font-weight:bold;color:#ddd;">${cm.trainees.length} / ${cm.maxRoster}</div>
                 </div>
-                <div style="background:#1a1a2a;padding:10px;border-radius:6px;text-align:center;">
+                <div style="background:#1a1a2a;padding:8px;border-radius:6px;text-align:center;">
                     <div style="font-size:10px;color:#888;text-transform:uppercase;">Graduated</div>
-                    <div style="font-size:18px;font-weight:bold;color:#8fd88f;">${cm.graduated}</div>
+                    <div style="font-size:16px;font-weight:bold;color:#8fd88f;">${cm.graduated}</div>
                 </div>
-                <div style="background:#1a1a2a;padding:10px;border-radius:6px;text-align:center;">
+                <div style="background:#1a1a2a;padding:8px;border-radius:6px;text-align:center;">
                     <div style="font-size:10px;color:#888;text-transform:uppercase;">Meet Wins</div>
-                    <div style="font-size:18px;font-weight:bold;color:#aaf;">${cm.meetWins}</div>
+                    <div style="font-size:16px;font-weight:bold;color:#aaf;">${cm.meetWins}</div>
+                </div>
+                <div style="background:#1a0a2a;padding:8px;border-radius:6px;text-align:center;cursor:pointer;border:1px solid ${cpAvail>0?'#8a4abe':'#333'};" onclick="openCoachSkillTreeModal()">
+                    <div style="font-size:10px;color:#888;text-transform:uppercase;">Coach Pts</div>
+                    <div style="font-size:16px;font-weight:bold;color:${cpAvail>0?'#f0c0ff':'#888'};">${cpAvail}</div>
+                    <div style="font-size:9px;color:#666;">click to spend</div>
                 </div>
             </div>`;
 
             // Roster
-            html += `<div style="font-size:11px;color:#888;text-transform:uppercase;letter-spacing:1px;margin-bottom:6px;">Your Roster</div>`;
+            html += `<div style="font-size:11px;color:#888;text-transform:uppercase;letter-spacing:1px;margin-bottom:6px;">Roster</div>`;
             if (cm.trainees.length === 0) {
                 html += `<div style="color:#666;font-size:12px;padding:8px;background:#1a1a1a;border-radius:6px;margin-bottom:12px;">No trainees yet. Recruit one from the pool below.</div>`;
             } else {
                 cm.trainees.forEach(t => {
+                    normalizeTrainee(t);
                     const total = Math.floor(t.squat + t.bench + t.deadlift);
-                    const pct = Math.min(100, total / 500 * 100);
-                    const ready = total >= 200 && t.meetCooldown <= 0;
-                    const cdTxt = t.meetCooldown > 0
-                        ? `Recovering ${Math.floor(t.meetCooldown / 60)}:${Math.floor(t.meetCooldown % 60).toString().padStart(2,'0')}`
-                        : (total < 200 ? `Need 200 kg total to compete` : `Ready to compete`);
-                    html += `<div style="background:#1a1a2a;border:1px solid #334;border-radius:8px;padding:10px;margin-bottom:8px;">
+                    const resting = t.restUntil > now;
+                    const accessory = t.accessoryUntil > now;
+                    const goalPct = (() => {
+                        const g = t.goal; if (!g) return 0;
+                        if (g.type === 'total') return Math.min(100, total / g.target * 100);
+                        if (g.type === 'lift')  return Math.min(100, t[g.lift] / g.target * 100);
+                        if (g.type === 'meetTier') return ((t.meetTierWins && t.meetTierWins[g.tier]) || 0) >= 1 ? 100 : 50;
+                        return 0;
+                    })();
+                    const fatigueBarColor = t.fatigue > 800 ? '#f44' : t.fatigue > 500 ? '#FFA000' : '#4CAF50';
+                    const motivColor = t.motivation > 75 ? '#8f8' : t.motivation > 50 ? '#FFA000' : '#f88';
+                    html += `<div style="background:#1a1a2a;border:1px solid ${t.legendary?'#FFD700':'#334'};border-radius:8px;padding:10px;margin-bottom:8px;cursor:pointer;" onclick="openTraineeDetailModal('${t.id}')">
                         <div style="display:flex;justify-content:space-between;align-items:baseline;">
                             <div>
-                                <strong style="color:#ddd;font-size:13px;">${t.name}</strong>
-                                <span style="font-size:11px;color:#888;margin-left:6px;">${t.archetype}</span>
+                                <strong style="color:${t.legendary?'#FFD700':'#ddd'};font-size:13px;">${t.legendary?'★ ':''}${t.name}</strong>
+                                <span style="font-size:11px;color:#888;margin-left:6px;">${t.archetype} · ${t.personality}</span>
                             </div>
-                            <span style="font-size:11px;color:#aaa;">Fame ${Math.floor(t.fame)} · W ${t.meetsWon||0} / L ${t.meetsLost||0}</span>
+                            <span style="font-size:11px;color:#aaa;">${resting?'💤 resting':accessory?'🔧 accessory':t.chronicInjury?'⚠ chronic':'training'}</span>
                         </div>
                         <div style="display:grid;grid-template-columns:repeat(4,1fr);gap:5px;margin:6px 0;font-size:11px;">
-                            <div>SQ: <strong style="color:#2196F3;">${Math.floor(t.squat)}</strong></div>
-                            <div>BP: <strong style="color:#4CAF50;">${Math.floor(t.bench)}</strong></div>
-                            <div>DL: <strong style="color:#FF5722;">${Math.floor(t.deadlift)}</strong></div>
-                            <div>Total: <strong style="color:#ddd;">${total}</strong></div>
+                            <div>SQ <strong style="color:#2196F3;">${Math.floor(t.squat)}</strong></div>
+                            <div>BP <strong style="color:#4CAF50;">${Math.floor(t.bench)}</strong></div>
+                            <div>DL <strong style="color:#FF5722;">${Math.floor(t.deadlift)}</strong></div>
+                            <div>Σ <strong style="color:#ddd;">${total}</strong></div>
                         </div>
-                        <div style="font-size:11px;color:#888;margin-bottom:4px;">Tech ${Math.floor(t.technique)} · Mot ${Math.floor(t.motivation)} · ${cdTxt}</div>
-                        <div style="background:#0a0a14;border-radius:3px;height:6px;overflow:hidden;margin-bottom:8px;">
-                            <div style="background:linear-gradient(90deg,#9C27B0,#E040FB);height:100%;width:${pct}%;"></div>
+                        <div style="font-size:10px;color:#888;margin-bottom:3px;">Goal: <span style="color:#ccc;">${t.goal?t.goal.label:'—'}</span> · ${Math.floor(goalPct)}%</div>
+                        <div style="background:#0a0a14;border-radius:3px;height:5px;overflow:hidden;margin-bottom:5px;">
+                            <div style="background:linear-gradient(90deg,#9C27B0,#E040FB);height:100%;width:${goalPct}%;"></div>
                         </div>
-                        <div style="display:grid;grid-template-columns:repeat(4,1fr);gap:3px;margin-bottom:6px;">
-                            ${['balanced','squat','bench','deadlift'].map(f =>
-                                `<button class="btn ${t.focus===f?'btn-success':'btn-primary'}" style="padding:3px;font-size:10px;" onclick="setTraineeFocus('${t.id}','${f}')">${f}</button>`
-                            ).join('')}
+                        <div style="display:flex;justify-content:space-between;font-size:10px;color:#888;">
+                            <span>Mot <strong style="color:${motivColor};">${Math.floor(t.motivation)}</strong></span>
+                            <span>Fat <strong style="color:${fatigueBarColor};">${Math.floor(t.fatigue)}</strong></span>
+                            <span>Tech <strong style="color:#aaf;">${Math.floor(t.technique)}</strong></span>
+                            <span>Int <strong style="color:#fc8;">${t.intensity}</strong></span>
+                            <span>Focus <strong style="color:#cfc;">${t.focus}</strong></span>
                         </div>
-                        <div style="display:grid;grid-template-columns:1fr 1fr;gap:4px;">
-                            <button class="btn btn-primary" style="padding:5px;font-size:11px;" onclick="sendTraineeToMeet('${t.id}')" ${ready ? '' : 'disabled'}>Send to Meet</button>
-                            <button class="btn btn-warning" style="padding:5px;font-size:11px;" onclick="dismissTraineeById('${t.id}')">Dismiss</button>
-                        </div>
+                        <div style="font-size:10px;color:#666;margin-top:4px;text-align:center;">click for full controls →</div>
                     </div>`;
                 });
             }
 
             // Recruit pool
-            html += `<div style="font-size:11px;color:#888;text-transform:uppercase;letter-spacing:1px;margin:14px 0 6px;">Available Recruits</div>`;
+            html += `<div style="font-size:11px;color:#888;text-transform:uppercase;letter-spacing:1px;margin:14px 0 6px;">Recruits</div>`;
             if (cm.trainees.length >= cm.maxRoster) {
-                html += `<div style="color:#888;font-size:11px;padding:6px;">Roster full. Dismiss or graduate someone to sign new talent.</div>`;
+                html += `<div style="color:#888;font-size:11px;padding:6px;">Roster full — release or graduate someone first.</div>`;
             }
             if (cm.recruitPool.length === 0) {
-                html += `<div style="color:#666;font-size:12px;padding:8px;background:#1a1a1a;border-radius:6px;">No new recruits right now. Check back in ~5 minutes.</div>`;
+                html += `<div style="color:#666;font-size:12px;padding:8px;background:#1a1a1a;border-radius:6px;">No new recruits right now.</div>`;
             } else {
                 cm.recruitPool.forEach((r, i) => {
                     const total = r.squat + r.bench + r.deadlift;
-                    html += `<div style="background:#1a1a1a;border:1px solid #444;border-radius:6px;padding:8px;margin-bottom:6px;">
+                    html += `<div style="background:#1a1a1a;border:1px solid ${r.legendary?'#FFD700':'#444'};border-radius:6px;padding:8px;margin-bottom:6px;">
                         <div style="display:flex;justify-content:space-between;align-items:baseline;">
-                            <strong style="color:#ddd;">${r.name}</strong>
-                            <span style="font-size:11px;color:#aaa;">${r.archetype} · ${total} kg</span>
+                            <strong style="color:${r.legendary?'#FFD700':'#ddd'};">${r.legendary?'★ ':''}${r.name}</strong>
+                            <span style="font-size:11px;color:#aaa;">${r.archetype} · age ${r.age} · ${r.personality} · ${total} kg</span>
                         </div>
                         <div style="font-size:11px;color:#888;font-style:italic;margin:3px 0;">${r.flavor}</div>
+                        <div style="font-size:11px;color:#bbb;margin-bottom:5px;">Career goal: <strong>${r.goal.label}</strong></div>
                         <button class="btn btn-success" style="padding:4px 10px;font-size:11px;width:100%;" onclick="recruitTrainee(${i})" ${cm.trainees.length >= cm.maxRoster ? 'disabled' : ''}>Sign ${r.name.split(' ')[0]}</button>
                     </div>`;
                 });
+            }
+
+            // History (graduated trainees)
+            if (Array.isArray(cm.history) && cm.history.length > 0) {
+                html += `<div style="font-size:11px;color:#888;text-transform:uppercase;letter-spacing:1px;margin:14px 0 6px;">Career Highlights</div>`;
+                html += `<div style="background:#0f1a0f;border:1px solid #2a4a2a;border-radius:6px;padding:8px;font-size:11px;max-height:200px;overflow-y:auto;">`;
+                cm.history.slice(0, 12).forEach(h => {
+                    const date = new Date(h.at).toLocaleDateString([], { month: 'short', day: 'numeric' });
+                    html += `<div style="padding:3px 0;border-bottom:1px solid #1a3a1a;display:flex;justify-content:space-between;">
+                        <span><strong style="color:#8fd88f;">${h.name}</strong> <span style="color:#aaa;">${h.archetype}</span></span>
+                        <span style="color:#888;">${h.total} kg · ${date}</span>
+                    </div>`;
+                });
+                html += `</div>`;
             }
 
             el.innerHTML = html;
@@ -7762,6 +8463,17 @@
         if (gameState.coachMode.meetWins === undefined)         gameState.coachMode.meetWins = 0;
         if (gameState.coachMode.fame === undefined)             gameState.coachMode.fame = 0;
         if (gameState.coachMode.maxRoster === undefined)        gameState.coachMode.maxRoster = 2;
+        // Deep coach mode fields
+        if (!gameState.coachMode.coachSkills)                   gameState.coachMode.coachSkills = {};
+        if (gameState.coachMode.coachSkillPointsSpent === undefined) gameState.coachMode.coachSkillPointsSpent = 0;
+        if (!Array.isArray(gameState.coachMode.history))        gameState.coachMode.history = [];
+        if (gameState.coachMode.activeEventTrainee === undefined) gameState.coachMode.activeEventTrainee = null;
+        if (gameState.coachMode.detailTraineeId === undefined)  gameState.coachMode.detailTraineeId = null;
+        if (gameState.coachMode.eventsResolved === undefined)   gameState.coachMode.eventsResolved = 0;
+        // Normalize existing trainees so older saves get all the new fields
+        if (typeof normalizeTrainee === 'function') {
+            gameState.coachMode.trainees.forEach(t => normalizeTrainee(t));
+        }
 
         // Initialise records from current save
         updateRecords();
